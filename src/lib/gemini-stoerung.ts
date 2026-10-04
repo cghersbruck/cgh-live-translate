@@ -42,6 +42,15 @@ const MUSTER_KONTINGENT = /quota|exhaust|rate.?limit|too many|\b429\b/i;
 const MUSTER_ZUGANG = /api.?key|unauthori[sz]ed|permission|forbidden|\b40[13]\b/i;
 const MUSTER_RICHTLINIE = /policy|safety/i;
 const MUSTER_VORUEBERGEHEND = /unavailable|overload|try again|deadline|timeout|\b50[234]\b/i;
+/**
+ * Nach einem goAway muss die alte Verbindung bis zum Fristende durch die neue
+ * ersetzt sein, sonst bricht Google sie mit 1008 ab ("Connection aborted
+ * because the client failed to close the connection after receiving a GoAway
+ * signal ..."). Beobachtet am 2026-10-04 als Folgefehler des leeren Guthabens.
+ * Der Abbruch selbst ist kein Grund zur Aufgabe - eine langsame
+ * Wiederverbindung kann ihn ebenso ausloesen.
+ */
+const MUSTER_GOAWAY_FRIST = /goaway|failed to close the connection/i;
 
 /** Ordnet einen Abbruch ein. `code` ist null bei Fehlern ohne Close-Frame. */
 export function klassifiziere(code: number | null, grund: string): StoerungsArt {
@@ -55,17 +64,24 @@ export function klassifiziere(code: number | null, grund: string): StoerungsArt 
     return "endgueltig";
   }
 
-  // 1008 Richtlinienverstoss, 1002/1003/1007 Protokoll- bzw. Datenfehler,
-  // 4xxx anwendungsspezifisch - alles nichts, was ein Wiederholen behebt.
+  if (MUSTER_GOAWAY_FRIST.test(g)) return "voruebergehend";
+
+  // 1002/1003/1007 Protokoll- bzw. Datenfehler, 4xxx anwendungsspezifisch -
+  // nichts, was ein Wiederholen behebt.
   if (
     code === 1002 ||
     code === 1003 ||
     code === 1007 ||
-    code === 1008 ||
     (code !== null && code >= 4000 && code < 5000)
   ) {
     return "endgueltig";
   }
+
+  // 1008 ("policy violation") nutzt Google auch fuer Protokollabbrueche, siehe
+  // MUSTER_GOAWAY_FRIST. Ein echter Richtlinienverstoss ist oben schon ueber den
+  // Grundtext erfasst. Ohne erkennbaren Grund daher begrenzt wiederholen statt
+  // sofort aufgeben.
+  if (code === 1008) return "unklar";
 
   if (code === 1011) {
     return MUSTER_VORUEBERGEHEND.test(g) ? "voruebergehend" : "unklar";

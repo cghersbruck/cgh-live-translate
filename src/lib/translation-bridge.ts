@@ -519,6 +519,11 @@ export class TranslationBridge {
       this.stoerungSetzen(code, grund, art);
       return;
     }
+    // Besteht bereits eine Stoerung, laeuft der Erholungstakt schon. Typischer
+    // Fall vom 2026-10-04: Wiederverbindung scheitert am leeren Guthaben,
+    // Sekunden spaeter bricht Google die alte Verbindung mit 1008 ab. Ohne
+    // diese Sperre gaebe es einen zusaetzlichen Sofortversuch.
+    if (this.stoerung) return;
     // Erster Versuch sofort - so verhaelt sich auch der bewaehrte goAway-Pfad.
     this.reconnectGemini();
   }
