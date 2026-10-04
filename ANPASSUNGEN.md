@@ -65,6 +65,9 @@ Vergleichsbasis für alle späteren Änderungen liefert.
 | `src/lib/translation-session-manager.ts` | **geändert (Ausfallerkennung)** | Störungsliste je Sprache, die den Abbau der Bridge überlebt; 50-s-Schonfrist nach endgültigem Fehler; Status liefert `gesundheit`, `hoerer` und `stoerung`. |
 | `src/app/api/translate/route.ts` | **geändert** | Bekannte Störung innerhalb der Schonfrist → HTTP 503 mit `Retry-After` statt 500 mit Stacktrace. |
 | `src/app/session/[id]/watch/page.tsx` (erneut) | **geändert** | Stopp-Knopf „Beenden", Media Session API, Audio Session API, Störungshinweis für Besucher. |
+| `src/lib/kosten.ts` | **neu** | Preise des Translate-Modells (Stand 2026-10-04) und Kostenschätzung. Bei Preisänderungen durch Google nur hier anpassen. |
+| `scripts/log-auswertung.sh` | **neu** | Fasst ein Container-Log nach dem Gottesdienst zusammen: je Bridge Laufzeit, Audio, geschätzte Kosten, Wiederverbindungen, Fehler. Läuft direkt auf dem Server. |
+| `src/lib/translation-bridge.ts` | **geändert (Kosten)** | Exakte Zähler für gesendetes und empfangenes Audio; Pause trennt die Gemini-Verbindung (siehe Abschnitt „Kosten"); Eingangsrate per `GEMINI_INPUT_SAMPLE_RATE` umschaltbar. |
 | `.gitignore` | **ergänzt** | `/logs` — Testlauf-Logs gehören nicht ins Repository. Dazu `!.env.example`: Das vorhandene Muster `.env*` hätte sonst auch die Vorlage ausgeschlossen, die eingecheckt werden muss. |
 
 ### Bewusst unverändert gelassen
@@ -134,6 +137,45 @@ Variable wirkungslos. **Nie im Produktivbetrieb setzen.**
 `LanguageSelector` und die Hörerseite den Hörer beide ab, der
 `subscriberCount` kann dadurch doppelt sinken. Für den neuen Stopp-Knopf ist
 das abgefangen; der Sprachwechsel selbst gehört zu T-08.
+
+---
+
+## Kosten
+
+Drei Messungen vom 2026-10-04 bestimmen das Kostenmodell:
+
+**1. Bezahlt wird Verbindungszeit, nicht gesprochener Text.** Gemini liefert bei
+offener Verbindung durchgehend Audio zurück — auch Stille — und rechnet es als
+Ausgabe ab. Die Ausgabe kostet das Sechsfache der Eingabe (21 $ gegenüber 3,50 $
+je Mio. Tokens). Kosten ≈ Minuten × Sprachen.
+
+**2. Pause sparte ursprünglich nichts.** Gemessen über 30 s Stummschaltung:
+
+| | Eingabe | Ausgabe |
+| :--- | ---: | ---: |
+| Upstream-Verhalten | +30,2 s | +30,2 s |
+| nur Eingabe gesperrt | +0,2 s | +30,3 s |
+| **jetzt: Verbindung nach 5 s getrennt** | **+0,2 s** | **+5,3 s** |
+
+Ein stummer Track liefert weiter Stille-Frames, und die bloße Sperre der
+Eingabe genügt nicht. Deshalb trennt die Bridge nach 5 s Pause die
+Gemini-Verbindung und baut sie beim Fortsetzen mit Resumption-Handle wieder
+auf (1–2 s). Ausgelöst wird das ausschließlich durch den Mute-Zustand des
+Sender-Tracks (Pause-Knopf, Companion, Mikrofon aus) — bewusst **keine**
+Sprachpausenerkennung, die Satzenden abschneiden könnte.
+
+**3. Die Eingabe wurde mit Faktor 3,0 abgerechnet.** Log-Auswertung:
+286 000 Tokens gesendet, Dashboard rund 870 000. Doppelt gesendetes Audio ist
+ausgeschlossen (exakt 10,0 Frames/s). Wir senden 48 kHz, Google empfiehlt
+16 kHz — 48 : 16 = 3. `GEMINI_INPUT_SAMPLE_RATE=16000` stellt um; LiveKit
+rechnet beim Abholen selbst um, am Mischpult ändert sich nichts.
+**Voreinstellung bleibt 48 000, bis ein A/B-Test die Annahme bestätigt.** Die
+Kostenschätzung rechnet bis dahin mit dem beobachteten Faktor.
+
+**Kostenanzeige** auf der Sendeseite: je Sprache und gesamt, alle 3 s
+aktualisiert, inklusive bereits beendeter Bridges. Optional in Euro über
+`KOSTEN_USD_EUR`. Beim Beenden der Session schreibt der Server die Schlusssumme
+ins Log (`grep KOSTEN`).
 
 ---
 

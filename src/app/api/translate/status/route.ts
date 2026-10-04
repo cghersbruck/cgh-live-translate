@@ -30,6 +30,8 @@ export async function GET(req: NextRequest) {
 
   const manager = TranslationSessionManager.getInstance();
   const translations = manager.getActiveTranslations(sessionId);
+  // Geschaetzte Kosten fuer die Anzeige auf der Sendeseite.
+  const kosten = manager.kostenLesen(sessionId);
 
-  return NextResponse.json({ translations });
+  return NextResponse.json({ translations, kosten });
 }

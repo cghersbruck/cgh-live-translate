@@ -38,9 +38,12 @@ Broadcast-Passwort.
 **Start** schaltet den Mikrofoneingang mit Standardeinstellungen ein. Läuft die
 Übertragung schon, hebt Start lediglich eine bestehende Pause auf.
 
-**Pause** hält den Ton an. Die Übersetzungs-Sitzungen bleiben dabei bestehen,
-es wird nur nichts mehr übertragen. Gedacht für Lobpreis und Moderation, damit
-das Modell keine Musik übersetzt. **Weiter** setzt verzögerungsfrei fort.
+**Pause** hält den Ton an. Nach 5 Sekunden trennt die App zusätzlich die
+Verbindung zu Gemini — sonst liefert Gemini weiter Stille und rechnet sie ab
+(gemessen: 30 s Pause ergaben vorher 30 s abgerechnete Ausgabe). Gedacht für
+Lobpreis und Moderation. **Weiter** baut die Verbindung wieder auf; bis wieder
+übersetzt wird, vergehen 1–2 Sekunden. Also kurz vor dem Einsatz des
+Predigers drücken.
 
 **Stopp** beendet die Übertragung vollständig.
 
@@ -64,7 +67,8 @@ Antwort:
   "connected": true,
   "sending": true,
   "paused": false,
-  "stoerungen": []
+  "stoerungen": [],
+  "kostenUsd": 1.23
 }
 ```
 
@@ -81,6 +85,9 @@ Werte prüfen. **`fehler` sollte die Taste rot färben** — das ist der Fall, i
 dem die Sendeseite selbst einwandfrei aussieht, die Besucher aber nichts mehr
 hören. `connected` eignet sich gut als Warnung: Steht es auf `false`,
 wurde vergessen, die Broadcast-Seite zu öffnen.
+
+`kostenUsd` ist die geschätzte Summe der laufenden Session — etwa für eine
+Anzeige auf einer Companion-Taste.
 
 Die Abfrage kann bedenkenlos jede Sekunde laufen — sie ist sehr leichtgewichtig
 und setzt keinen Befehl ab.

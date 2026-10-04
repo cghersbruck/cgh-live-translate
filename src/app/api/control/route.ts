@@ -56,6 +56,8 @@ function antwort(sessionId: string, extra: Record<string, unknown> = {}) {
     sending: e.state.sending,
     paused: e.state.paused,
     stoerungen,
+    // Geschaetzte Kosten der Session, z. B. fuer eine Companion-Anzeige.
+    kostenUsd: Math.round(TranslationSessionManager.getInstance().kostenLesen(sessionId).gesamtUsd * 100) / 100,
     pendingAction: e.action,
     seq: e.seq,
     ...extra,

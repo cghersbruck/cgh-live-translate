@@ -25,6 +25,24 @@
 
 import { TranslationBridge, BridgeStatus, Gesundheit } from "./translation-bridge";
 import { ausFehler, klassifiziere, klartext, type Stoerung } from "./gemini-stoerung";
+import { eurKurs } from "./kosten";
+
+/** Verbrauch einer Sprache, aufsummiert ueber alle Bridges dieser Session. */
+export interface SprachKosten {
+  sprache: string;
+  eingabeSek: number;
+  ausgabeSek: number;
+  usd: number;
+  /** Laeuft gerade eine Bridge fuer diese Sprache? */
+  laeuft: boolean;
+}
+
+export interface SessionKosten {
+  sprachen: SprachKosten[];
+  gesamtUsd: number;
+  /** Gesetzt, wenn KOSTEN_USD_EUR konfiguriert ist. */
+  eurKurs: number | null;
+}
 
 /**
  * Nach einem endgueltigen Fehler (etwa erschoepftem Guthaben) wird so lange
@@ -77,6 +95,61 @@ class TranslationSessionManager {
   // Stoerungen je Session und Sprache. Ueberleben den Abbau der Bridge, damit
   // sichtbar bleibt, WARUM eine Sprache weg ist.
   private stoerungen: Map<string, Map<string, Stoerung>> = new Map();
+
+  // Verbrauch bereits beendeter Bridges. Ohne das verschwaenden die Kosten
+  // einer Sprache, sobald ihre Bridge abgebaut wird - am 2026-10-04 lief
+  // Ungarisch zum Beispiel in zwei getrennten Bridges.
+  private abgeschlossen: Map<string, Map<string, { eingabeSek: number; ausgabeSek: number; usd: number }>> = new Map();
+  // Schutz vor doppelter Verbuchung: Mehrere Abbaupfade koennen dieselbe
+  // Bridge erreichen (onStop und expliziter Abbau).
+  private verbucht = new WeakSet<TranslationBridge>();
+
+  private verbuchen(sessionId: string, sprache: string, bridge: TranslationBridge): void {
+    if (this.verbucht.has(bridge)) return;
+    this.verbucht.add(bridge);
+    const v = bridge.verbrauch;
+    if (v.eingabeSek === 0 && v.ausgabeSek === 0) return;
+    let m = this.abgeschlossen.get(sessionId);
+    if (!m) {
+      m = new Map();
+      this.abgeschlossen.set(sessionId, m);
+    }
+    const bisher = m.get(sprache) ?? { eingabeSek: 0, ausgabeSek: 0, usd: 0 };
+    m.set(sprache, {
+      eingabeSek: bisher.eingabeSek + v.eingabeSek,
+      ausgabeSek: bisher.ausgabeSek + v.ausgabeSek,
+      usd: bisher.usd + bridge.kostenUsd,
+    });
+    console.log(
+      `[SessionManager] Kosten verbucht ${sprache}: ${Math.round(v.eingabeSek)} s ein, ${Math.round(v.ausgabeSek)} s aus, ~${bridge.kostenUsd.toFixed(2)} USD`
+    );
+  }
+
+  /** Geschaetzte Kosten der Session, laufende und beendete Bridges zusammen. */
+  kostenLesen(sessionId: string): SessionKosten {
+    const summe = new Map<string, SprachKosten>();
+    for (const [sprache, k] of this.abgeschlossen.get(sessionId) ?? []) {
+      summe.set(sprache, { sprache, ...k, laeuft: false });
+    }
+    for (const [sprache, bridge] of this.translations.get(sessionId) ?? []) {
+      if (this.verbucht.has(bridge)) continue;
+      const v = bridge.verbrauch;
+      const bisher = summe.get(sprache) ?? { sprache, eingabeSek: 0, ausgabeSek: 0, usd: 0, laeuft: false };
+      summe.set(sprache, {
+        sprache,
+        eingabeSek: bisher.eingabeSek + v.eingabeSek,
+        ausgabeSek: bisher.ausgabeSek + v.ausgabeSek,
+        usd: bisher.usd + bridge.kostenUsd,
+        laeuft: bridge.status === "active",
+      });
+    }
+    const sprachen = Array.from(summe.values()).sort((a, b) => b.usd - a.usd);
+    return {
+      sprachen,
+      gesamtUsd: sprachen.reduce((s, k) => s + k.usd, 0),
+      eurKurs: eurKurs(),
+    };
+  }
 
   private stoerungMerken(sessionId: string, sprache: string, s: Stoerung): void {
     let m = this.stoerungen.get(sessionId);
@@ -150,6 +223,7 @@ class TranslationSessionManager {
         console.log(
           `[SessionManager] Cleaning up stale bridge for ${targetLanguage}`
         );
+        this.verbuchen(sessionId, targetLanguage, existingBridge);
         await existingBridge.stop();
         languageMap.delete(targetLanguage);
       }
@@ -208,6 +282,7 @@ class TranslationSessionManager {
     bridge.onWiederhergestellt = () => this.stoerungLoeschen(sessionId, targetLanguage);
 
     bridge.onStop = () => {
+      this.verbuchen(sessionId, targetLanguage, bridge);
       const languageMap = this.translations.get(sessionId);
       if (languageMap) {
         languageMap.delete(targetLanguage);
@@ -319,6 +394,7 @@ class TranslationSessionManager {
       console.log(
         `[SessionManager] No more subscribers for ${targetLanguage}, tearing down bridge`
       );
+      this.verbuchen(sessionId, targetLanguage, bridge);
       bridge.onStop = undefined;
       await bridge.stop();
     }
@@ -333,6 +409,7 @@ class TranslationSessionManager {
 
     const bridge = languageMap.get(targetLanguage);
     if (bridge) {
+      this.verbuchen(sessionId, targetLanguage, bridge);
       bridge.onStop = undefined;
       await bridge.stop();
       languageMap.delete(targetLanguage);
@@ -343,6 +420,19 @@ class TranslationSessionManager {
   }
 
   async removeAllTranslations(sessionId: string): Promise<void> {
+    // Schlusssumme ins Log, bevor die Session samt Zaehlern verschwindet -
+    // auffindbar nach dem Gottesdienst mit: grep KOSTEN
+    const kosten = this.kostenLesen(sessionId);
+    if (kosten.sprachen.length > 0) {
+      console.log(
+        `[SessionManager] KOSTEN Session ${sessionId}: ~${kosten.gesamtUsd.toFixed(2)} USD gesamt (` +
+          kosten.sprachen
+            .map((k) => `${k.sprache} ${Math.round(k.eingabeSek / 60)} min ~${k.usd.toFixed(2)} USD`)
+            .join(", ") +
+          ")"
+      );
+    }
+
     const languageMap = this.translations.get(sessionId);
     if (languageMap) {
       for (const [, bridge] of languageMap) {
@@ -354,6 +444,7 @@ class TranslationSessionManager {
     }
     this.sessions.delete(sessionId);
     this.stoerungen.delete(sessionId);
+    this.abgeschlossen.delete(sessionId);
     console.log(
       `[SessionManager] Removed all bridges and session for ${sessionId}`
     );

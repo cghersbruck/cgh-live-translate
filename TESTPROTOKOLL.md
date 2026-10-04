@@ -313,6 +313,43 @@ Live-Test über den ganzen Gottesdienst, zwei Sprachen, eigener Docker-Host.
 | Nach 52 s | echter Neuversuch, Zähler steigt auf 2 |
 | Log | Stacktrace nur für die zwei echten Versuche, Schlüssel nicht im Log |
 
+### Log-Auswertung des Gottesdienstes (2026-10-04)
+
+| Sprache | Laufzeit | Audio gesendet | Frames/s | goAway | Wiederverb. (davon ok) |
+| :--- | :--- | ---: | ---: | ---: | :--- |
+| Ungarisch | 09:19–11:10 | 84 min | 10,0 | 9 | 271 (9) |
+| Rumänisch | 09:41–11:10 | 64 min | 10,0 | 7 | 248 (6) |
+| Englisch | Tests, zusammen ~18 min | | 10,0 | | |
+
+- Guthaben leer ab **10:43** (Ungarisch) bzw. **10:46** (Rumänisch). Laufende
+  Verbindungen übersetzten bis zum nächsten `goAway` weiter; erst die
+  Wiederverbindung scheiterte. Danach rund 500 vergebliche Versuche bis 11:10.
+- Folgefehler 1008 „client failed to close the connection after receiving a
+  GoAway signal": Die alte Verbindung wurde zum Fristende abgebrochen, weil die
+  neue nicht zustande kam. Wird jetzt als vorübergehend eingestuft.
+- Normale Lücke beim `goAway` rund 4 s, Maximum 12 s.
+
+### Kostenmessungen (2026-10-04, lokal, Demo-Sender)
+
+Pause = Sender-Track stummgeschaltet, gemessen über 30 s:
+
+| Stand | Eingabe | Ausgabe |
+| :--- | ---: | ---: |
+| Upstream | +30,2 s | +30,2 s |
+| nur Eingabe gesperrt | +0,2 s | +30,3 s |
+| Verbindung nach 5 s getrennt | +0,2 s | +5,3 s |
+
+**Noch offen:** das Fortsetzen nach einer Pause. LiveKit Cloud verweigert das
+Freigeben per API, der Pfad ist nur im Quellcode von `rtc-node` geprüft
+(`trackUnmuted` setzt das Flag zurück). **Vor dem nächsten Gottesdienst einmal
+im Browser testen:** Pause → 10 s warten → Weiter → Übersetzung muss nach 1–2 s
+wieder kommen. Im Log: „Gemini-Verbindung waehrend der Pause getrennt", dann
+„Pause beendet - Gemini-Verbindung wird wieder aufgebaut".
+
+**A/B-Test Abtastrate:** offen. Je 10 min Demo-Sender mit
+`GEMINI_INPUT_SAMPLE_RATE=48000` und `=16000`, in getrennten Stunden, dann die
+Eingabetokens im Dashboard vergleichen.
+
 **Nicht automatisiert getestet:** das Wiederholbudget von 2 Minuten bei
 anhaltend vorübergehenden Fehlern (dafür bräuchte es einen Server, der
 wiederholt mit 1006 abbricht). Die Logik ist einfach; Prüfung über T-17.

@@ -40,6 +40,7 @@ import {
   AudioStream,
 } from "@livekit/rtc-node";
 import WebSocket from "ws";
+import { kostenUsd, type Verbrauch } from "./kosten";
 import {
   GeminiCloseError,
   klassifiziere,
@@ -74,6 +75,11 @@ const ERHOLUNG_MS = 60_000;
 const STOCKEND_NACH_MS = 20_000;
 /** Ohne Sprache am Eingang so lange -> "pausiert" (Lobpreis, Pause). */
 const PAUSIERT_NACH_MS = 5_000;
+/**
+ * So lange muss der Sender pausiert sein, bis die Gemini-Verbindung getrennt
+ * wird. Verhindert staendiges Neuverbinden bei kurzem Antippen.
+ */
+const PAUSE_TRENNEN_NACH_MS = 5_000;
 /** Pegel, ab dem ein Eingangsframe als Sprache zaehlt: etwa -50 dBFS. */
 const SPRACHSCHWELLE = 100;
 
@@ -103,7 +109,17 @@ export class TranslationBridge {
   private readonly geminiApiKey: string;
   private readonly geminiModel: string = "gemini-3.5-live-translate-preview";
   private readonly sampleRate: number = 24000; // Gemini outputs 24kHz
-  private readonly inputSampleRate: number = 48000; // LiveKit default
+  // Eingangsrate an Gemini. Upstream fest 48 kHz (LiveKit-Default); Google
+  // empfiehlt 16 kHz. Am 2026-10-04 wurde die Eingabe mit Faktor 3 abgerechnet,
+  // was genau 48 : 16 entspricht. LiveKit rechnet beim Abholen selbst um, am
+  // Mischpult aendert sich nichts. Voreinstellung bleibt 48 kHz, bis ein A/B-
+  // Test die Umstellung bestaetigt (so verlangt es das Briefing).
+  private readonly inputSampleRate: number = TranslationBridge.eingangsrate();
+
+  private static eingangsrate(): number {
+    const r = Number(process.env.GEMINI_INPUT_SAMPLE_RATE);
+    return [16000, 24000, 48000].includes(r) ? r : 48000;
+  }
   private readonly channels: number = 1;
 
     // LiveKit config
@@ -130,6 +146,19 @@ export class TranslationBridge {
   private spracheSeit: number = 0;
   private verbundenSeit: number = 0;
   private teststoerungGeplant: boolean = false;
+
+  // --- Verbrauch fuer die Kostenschaetzung ------------------------------
+  // Exakt aus den tatsaechlich gesendeten bzw. empfangenen Samples, nicht aus
+  // der Laufzeit: Waehrend Pausen und Ausfaellen fliesst nichts.
+  private eingabeSamples: number = 0;
+  private ausgabeBytes: number = 0;
+
+  // Track des Senders, um seinen Mute-Zustand abzufragen.
+  private organizerTrack: RemoteAudioTrack | null = null;
+  private senderPausiert: boolean = false;
+  private pausiertSeit: number = 0;
+  /** Gemini-Verbindung waehrend einer Pause bewusst getrennt. */
+  private ruhend: boolean = false;
 
   constructor(
     sessionId: string,
@@ -389,6 +418,9 @@ export class TranslationBridge {
       return;
     }
     if (this.status !== "active" || this.stopping) return;
+    // Waehrend einer Pause wird nicht verbunden - genau das soll ja sparen.
+    // Beim Fortsetzen ruft geminiAufwecken() diese Methode erneut auf.
+    if (this.ruhend) return;
     this.isReconnecting = true;
     if (this.wiederholTimer) {
       clearTimeout(this.wiederholTimer);
@@ -615,6 +647,10 @@ export class TranslationBridge {
     this.wiederholTimer = setTimeout(() => {
       this.wiederholTimer = null;
       if (this.status !== "active" || this.stopping) return;
+      if (this.ruhend) {
+        this.erholungPlanen();
+        return;
+      }
       if (this.anzahlHoerer() === 0) {
         console.log(
           `[TranslationBridge:${this.targetLanguage}] Stoerung, aber niemand hoert zu - kein Erholungsversuch`
@@ -656,6 +692,21 @@ export class TranslationBridge {
    * per sendBeacon heruntergezaehlt und bleibt bei hart beendeten Browsern
    * stehen.
    */
+  /** Bisheriger Verbrauch dieser Bridge. */
+  public get verbrauch(): Verbrauch {
+    return {
+      eingabeSek: this.eingabeSamples / this.inputSampleRate,
+      // 16 Bit = 2 Bytes je Sample, Gemini liefert 24 kHz mono.
+      ausgabeSek: this.ausgabeBytes / 2 / this.sampleRate,
+      abtastrate: this.inputSampleRate,
+    };
+  }
+
+  /** Geschaetzte Kosten dieser Bridge in USD. */
+  public get kostenUsd(): number {
+    return kostenUsd(this.verbrauch);
+  }
+
   public anzahlHoerer(): number {
     if (!this.room) return 0;
     return Array.from(this.room.remoteParticipants.values()).filter(
@@ -667,6 +718,7 @@ export class TranslationBridge {
     if (this.status === "starting") return "startet";
     if (this.status !== "active") return "beendet";
     if (this.stoerung) return "gestoert";
+    if (this.ruhend) return "pausiert";
     if (!this.geminiSetupComplete) return "verbindet";
 
     const jetzt = Date.now();
@@ -677,6 +729,32 @@ export class TranslationBridge {
     // Pause einen Fehlalarm, bevor die erste Uebersetzung zurueckkommt.
     const bezug = Math.max(this.lastAudioFrameTime, this.verbundenSeit, this.spracheSeit);
     return jetzt - bezug > STOCKEND_NACH_MS ? "stockend" : "gesund";
+  }
+
+  /** Gemini-Verbindung waehrend einer Pause trennen, um Kosten zu sparen. */
+  private geminiRuhenLassen(): void {
+    const ws = this.geminiWs;
+    this.geminiWs = null;
+    this.geminiSetupComplete = false;
+    this.ruhend = true;
+    if (ws) {
+      // Listener entfernen: Dieser Abbruch ist gewollt und darf nicht als
+      // Verbindungsabbruch gewertet werden.
+      ws.removeAllListeners();
+      ws.close();
+    }
+    console.log(
+      `[TranslationBridge:${this.targetLanguage}] Gemini-Verbindung waehrend der Pause getrennt (spart Kosten)`
+    );
+  }
+
+  /** Nach der Pause wieder verbinden, mit Resumption-Handle. */
+  private geminiAufwecken(): void {
+    this.ruhend = false;
+    console.log(
+      `[TranslationBridge:${this.targetLanguage}] Pause beendet - Gemini-Verbindung wird wieder aufgebaut`
+    );
+    this.reconnectGemini();
   }
 
   /** Pegel des Eingangsframes messen, um Sprache von Stille zu trennen. */
@@ -817,6 +895,9 @@ export class TranslationBridge {
       if (parts?.length) {
         for (const part of parts) {
           if (part.inlineData?.data) {
+            const b64: string = part.inlineData.data;
+            this.ausgabeBytes +=
+              (b64.length * 3) / 4 - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
             this.framesReceivedFromGemini++;
             if (this.framesReceivedFromGemini <= 3 || this.framesReceivedFromGemini % 100 === 0) {
               console.log(
@@ -1002,6 +1083,7 @@ export class TranslationBridge {
   }
 
   private pipeTrackToGemini(track: RemoteAudioTrack): void {
+    this.organizerTrack = track;
     console.log(
       `[TranslationBridge:${this.targetLanguage}] Subscribed to organizer audio track, piping to Gemini`
     );
@@ -1035,6 +1117,40 @@ export class TranslationBridge {
     // sein, ob gerade gesprochen wird.
     this.eingangMessen(frame.data);
 
+    // Pausiert der Sender (Pause-Knopf, Companion oder Mikrofon aus), ist sein
+    // Track stummgeschaltet. LiveKit liefert dann trotzdem weiter Frames -
+    // Stille. Am 2026-10-04 gemessen: Wurden die gesendet, rechnete Gemini sie
+    // ab und lieferte sogar 1:1 Ausgabe dafuer zurueck. Pause sparte also
+    // nichts. Deshalb hier verwerfen.
+    //
+    // Die Eingabe anzuhalten genuegt aber nicht: Gemini liefert bei offener
+    // Verbindung weiter Ausgabe (Stille) und rechnet sie ab - gemessen am
+    // 2026-10-04, 30 s Pause ergaben weiterhin 30 s Ausgabe. Nach
+    // PAUSE_TRENNEN_NACH_MS wird die Verbindung deshalb getrennt und beim
+    // Fortsetzen mit Resumption-Handle wieder aufgebaut.
+    const pausiert = this.organizerTrack?.muted === true;
+    if (pausiert !== this.senderPausiert) {
+      this.senderPausiert = pausiert;
+      console.log(
+        `[TranslationBridge:${this.targetLanguage}] ${pausiert ? "Sender pausiert - kein Audio an Gemini" : "Sender fortgesetzt"}`
+      );
+    }
+    if (pausiert) {
+      if (!this.pausiertSeit) this.pausiertSeit = Date.now();
+      // Bedingung prueft die offene Verbindung statt nur das Flag: Eine
+      // Wiederverbindung, die waehrend der Pause noch fertig wurde, wird so
+      // ebenfalls getrennt.
+      if (this.geminiWs && Date.now() - this.pausiertSeit > PAUSE_TRENNEN_NACH_MS) {
+        this.geminiRuhenLassen();
+      }
+      return;
+    }
+    this.pausiertSeit = 0;
+    if (this.ruhend) {
+      this.geminiAufwecken();
+      return;
+    }
+
     if (
       !this.geminiWs ||
       this.geminiWs.readyState !== WebSocket.OPEN ||
@@ -1050,6 +1166,7 @@ export class TranslationBridge {
       const base64 = buffer.toString("base64");
 
       this.framesSentToGemini++;
+      this.eingabeSamples += int16Data.length;
       if (this.framesSentToGemini <= 3 || this.framesSentToGemini % 500 === 0) {
         console.log(
           `[TranslationBridge:${this.targetLanguage}] Sent audio frame #${this.framesSentToGemini} to Gemini (${base64.length} bytes base64, ${int16Data.length} samples)`

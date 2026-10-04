@@ -135,6 +135,19 @@ Jeder Ausfall der Übersetzung erzeugt genau eine auffindbare Zeile:
 docker logs cgh-live-translate 2>&1 | grep -E "STOERUNG|wiederhergestellt"
 ```
 
+### Nach dem Gottesdienst auswerten
+
+```bash
+docker logs -t --since 2h cgh-live-translate > gottesdienst.log 2>&1
+curl -sO https://raw.githubusercontent.com/cghersbruck/cgh-live-translate/main/scripts/log-auswertung.sh
+sh log-auswertung.sh gottesdienst.log
+
+# Schlusssumme jeder beendeten Session
+grep KOSTEN gottesdienst.log
+```
+
+`2>&1` nicht vergessen — sonst landen die Fehlerzeilen nicht in der Datei.
+
 ### Aktualisieren
 
 ```bash

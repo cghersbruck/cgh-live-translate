@@ -44,6 +44,19 @@ interface TranslationInfo {
  * Statusfeld: "active" blieb am 2026-10-04 gruen, waehrend die Uebersetzung
  * wegen erschoepften Guthabens laengst ausgefallen war.
  */
+interface SessionKosten {
+  sprachen: { sprache: string; eingabeSek: number; ausgabeSek: number; usd: number; laeuft: boolean }[];
+  gesamtUsd: number;
+  eurKurs: number | null;
+}
+
+function betrag(usd: number, eurKurs: number | null): string {
+  const dollar = usd.toLocaleString("de-DE", { style: "currency", currency: "USD" });
+  if (!eurKurs) return dollar;
+  const euro = (usd * eurKurs).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+  return `${euro} (${dollar})`;
+}
+
 const GESUNDHEIT_ANZEIGE: Record<string, { text: string; klasse: string }> = {
   gesund: { text: "Übersetzt", klasse: "active" },
   pausiert: { text: "Wartet auf Sprache", klasse: "waiting" },
@@ -64,6 +77,7 @@ function BroadcastControls({
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const [translations, setTranslations] = useState<TranslationInfo[]>([]);
+  const [kosten, setKosten] = useState<SessionKosten | null>(null);
   const [listenerCount, setListenerCount] = useState(0);
 
   // Track active attendees count without useRemoteParticipants hook overhead
@@ -161,6 +175,7 @@ function BroadcastControls({
       const res = await fetch(`/api/translate/status?sessionId=${sessionId}`);
       const data = await res.json();
       setTranslations(data.translations || []);
+      setKosten(data.kosten ?? null);
     } catch (err) {
       console.error("Failed to fetch translations:", err);
     }
@@ -558,10 +573,10 @@ function BroadcastControls({
               {statusText}
             </span>
 
-            {/* Pause haelt nur den Ton an; Eingaenge und Uebersetzungs-
-                Sitzungen bleiben bestehen. Gedacht fuer Lobpreis und
-                Moderation - lange Pausen beim Modell loesen ausserdem die
-                dokumentierten Stimmwechsel aus. */}
+            {/* Pause schaltet den Ton stumm. Nach 5 s trennt die Bridge die
+                Gemini-Verbindung, weil Gemini sonst weiter (Stille) liefert
+                und abrechnet. "Weiter" baut sie mit Resumption-Handle neu
+                auf, das dauert 1-2 s. Gedacht fuer Lobpreis und Moderation. */}
             {isAudioActive && (
               <button
                 onClick={() => setIsPaused((p) => !p)}
@@ -777,6 +792,49 @@ function BroadcastControls({
               </div>
             );
           })
+        )}
+
+        {/* Kostenschaetzung. Aktualisiert sich mit jeder Statusabfrage
+            (alle 3 s). Gemessen am 2026-10-04: Gemini rechnet die Zeit ab,
+            in der die Verbindung offen ist, nicht den gesprochenen Text. */}
+        {kosten && kosten.sprachen.length > 0 && (
+          <div
+            style={{
+              marginTop: 24,
+              padding: "16px 20px",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border)",
+              textAlign: "left",
+            }}
+          >
+            <span className="label" style={{ display: "block", marginBottom: 8 }}>
+              Kosten dieser Session · Schätzung
+            </span>
+            <p style={{ fontSize: 28, fontWeight: 600, margin: "0 0 12px" }}>
+              {betrag(kosten.gesamtUsd, kosten.eurKurs)}
+            </p>
+            {kosten.sprachen.map((k) => (
+              <div
+                key={k.sprache}
+                className="body-sm"
+                style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}
+              >
+                <span>
+                  {getLanguageByCode(k.sprache)?.name ?? k.sprache}
+                  {k.laeuft ? " · läuft" : ""}
+                </span>
+                <span className="mono">
+                  {Math.round(k.eingabeSek / 60)} min · {betrag(k.usd, kosten.eurKurs)}
+                </span>
+              </div>
+            ))}
+            <p className="body-sm" style={{ margin: "10px 0 0", opacity: 0.7 }}>
+              Berechnet aus übertragenen Audiominuten und Googles Preisliste.
+              Abgerechnet wird, solange die Verbindung besteht – auch bei
+              Musik und Stille. Pause trennt nach 5&nbsp;s und hält den
+              Zähler an.
+            </p>
+          </div>
         )}
 
         {systemInstruction && (
