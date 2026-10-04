@@ -19,6 +19,7 @@ import {
   zustandMelden,
   type ControlAction,
 } from "@/lib/broadcast-control";
+import TranslationSessionManager from "@/lib/translation-session-manager";
 
 const ERLAUBTE_AKTIONEN: ControlAction[] = ["start", "pause", "resume", "stop"];
 
@@ -30,12 +31,23 @@ function pruefePasswort(uebergeben: string | null): boolean {
 
 function antwort(sessionId: string, extra: Record<string, unknown> = {}) {
   const e = statusLesen(sessionId);
+
+  // Gestoerte Uebersetzungen. Damit Companion eine Taste rot faerben kann,
+  // wenn etwa das Gemini-Guthaben erschoepft ist - waehrend die Sendeseite
+  // selbst einwandfrei sendet.
+  const stoerungen = TranslationSessionManager.getInstance()
+    .getActiveTranslations(sessionId)
+    .filter((t) => t.gesundheit === "gestoert")
+    .map((t) => ({ sprache: t.language, text: t.stoerung?.text ?? "unbekannt" }));
+
   return NextResponse.json({
     sessionId,
-    // Klartext fuer die Companion-Anzeige.
+    // Klartext fuer die Companion-Anzeige. Reihenfolge = Prioritaet.
     status: !e.state.connected
       ? "getrennt"
-      : e.state.paused
+      : stoerungen.length > 0
+        ? "fehler"
+        : e.state.paused
         ? "pausiert"
         : e.state.sending
           ? "sendet"
@@ -43,6 +55,7 @@ function antwort(sessionId: string, extra: Record<string, unknown> = {}) {
     connected: e.state.connected,
     sending: e.state.sending,
     paused: e.state.paused,
+    stoerungen,
     pendingAction: e.action,
     seq: e.seq,
     ...extra,

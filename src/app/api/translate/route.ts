@@ -15,7 +15,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import TranslationSessionManager from "@/lib/translation-session-manager";
+import TranslationSessionManager, { StoerungsFehler } from "@/lib/translation-session-manager";
 
 // POST /api/translate — Request a translation stream for a language
 export async function POST(req: NextRequest) {
@@ -78,9 +78,25 @@ export async function POST(req: NextRequest) {
       targetLanguage: bridge.targetLanguage,
     });
   } catch (error) {
+    // Bekannte Stoerung innerhalb der Schonfrist: kein Stacktrace ins Log -
+    // der Grund wurde beim ersten Auftreten bereits protokolliert.
+    if (error instanceof StoerungsFehler) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          stoerung: true,
+          // Die Hoererseite versucht es nach dieser Zeit selbst erneut.
+          retryAfterSeconds: 60,
+        },
+        { status: 503, headers: { "Retry-After": "60" } }
+      );
+    }
     console.error("Error requesting translation:", error);
     return NextResponse.json(
-      { error: "Failed to start translation: " + (error as Error).message },
+      {
+        error: "Failed to start translation: " + (error as Error).message,
+        retryAfterSeconds: 60,
+      },
       { status: 500 }
     );
   }

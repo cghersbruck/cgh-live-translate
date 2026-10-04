@@ -60,6 +60,11 @@ Vergleichsbasis für alle späteren Änderungen liefert.
 | `src/app/session/[id]/watch/components/LanguageSelector.tsx` | **geändert** | T-05: native Anzeigenamen, deutsche Texte und Fehlermeldungen. Die Sprachauswahl selbst folgt weiter dem Upstream-Verhalten — maßgeblich ist allein, was beim Anlegen der Session freigegeben wurde. |
 | `src/app/page.tsx` | **geändert** | Vorauswahl der Sprachen beim Anlegen einer Session auf `GEMEINDE_LANGUAGES` umgestellt (Upstream hatte dort ebenfalls eine feste Liste: en, zh-Hans, hi, es, fr, ar, bn, pt-BR, ru, ur). |
 | `README.md` | **ersetzt** | Eigenes README für Installation, Konfiguration und Nutzung. Das englische Original liegt unverändert als `README.upstream.md` bei. |
+| `src/lib/gemini-stoerung.ts` | **neu** | Einstufung von Gemini-Abbrüchen in endgültig, vorübergehend und unklar — anhand von Close-Code **und** Grundtext, weil Google den eigentlichen Grund als Klartext in Code 1011 transportiert. Dazu deutscher Klartext für die Sendeseite. |
+| `src/lib/translation-bridge.ts` | **geändert (Ausfallerkennung)** | Siehe Abschnitt „Ausfallerkennung". Der größte Eingriff in Upstream-Code; begründet durch den Ausfall vom 2026-10-04. Der goAway-/Resumption-Pfad bleibt in seinem Verhalten unverändert. |
+| `src/lib/translation-session-manager.ts` | **geändert (Ausfallerkennung)** | Störungsliste je Sprache, die den Abbau der Bridge überlebt; 50-s-Schonfrist nach endgültigem Fehler; Status liefert `gesundheit`, `hoerer` und `stoerung`. |
+| `src/app/api/translate/route.ts` | **geändert** | Bekannte Störung innerhalb der Schonfrist → HTTP 503 mit `Retry-After` statt 500 mit Stacktrace. |
+| `src/app/session/[id]/watch/page.tsx` (erneut) | **geändert** | Stopp-Knopf „Beenden", Media Session API, Audio Session API, Störungshinweis für Besucher. |
 | `.gitignore` | **ergänzt** | `/logs` — Testlauf-Logs gehören nicht ins Repository. Dazu `!.env.example`: Das vorhandene Muster `.env*` hätte sonst auch die Vorlage ausgeschlossen, die eingecheckt werden muss. |
 
 ### Bewusst unverändert gelassen
@@ -82,6 +87,53 @@ für dieselbe Sache gewesen.
 Geblieben ist der Teil, den Chrome **nicht** anbietet: das Abschalten der
 Signalaufbereitung. Dafür gibt es in Chrome keine Einstellung, es geht nur beim
 Anfordern des Audios.
+
+---
+
+## Ausfallerkennung
+
+**Anlass:** Am 2026-10-04 fiel die Übersetzung gegen Ende des Gottesdienstes
+aus, während die Sendeseite „active" zeigte. Ursache laut Log: Code 1011,
+„Your prepayment credits are depleted". Das Gemini-Dashboard zeigte danach
+rund 500 abgelehnte Anfragen (429/409) in zwei Stunden.
+
+Drei Mängel im Upstream-Code machten aus einem leeren Guthaben einen stillen
+Totalausfall:
+
+1. **Der Status log.** `status` wurde nur beim ersten Start gesetzt. Scheiterte
+   die Wiederverbindung im Betrieb, blieb er `active`.
+2. **Endlosschleife.** Jeder Abbruch wurde wie ein Netzaussetzer behandelt und
+   im Sekundentakt wiederholt — auch einer, der sich nie von selbst löst.
+3. **Ein ungültiger Resumption-Handle wurde nie verworfen** und bei jedem
+   Versuch erneut gesendet.
+
+**Jetzt:**
+
+| Abbruch | Reaktion |
+| :--- | :--- |
+| `goAway` | Resumption mit Handle — unverändert |
+| vorübergehend (1006, Netzfehler, Serverneustart) | Wiederholen nach 1, 2, 5, 10, 20, 30 s, höchstens 2 Minuten |
+| endgültig (Guthaben, Kontingent, Schlüssel, Richtlinie) | sofort Störung, kein schnelles Wiederholen |
+| Wiederholbudget erschöpft | Störung |
+| während einer Störung | ein Versuch pro Minute, **nur solange jemand zuhört**; nach Aufladen läuft es von selbst wieder an |
+
+Nach zwei Fehlschlägen mit Resumption-Handle wird dieser verworfen und frisch
+begonnen.
+
+**Gesundheit statt Statusflag.** Abgeleitet aus dem Audiofluss: `gesund`,
+`pausiert` (keine Sprache am Eingang), `stockend` (Sprache kommt an, aber seit
+20 s keine Übersetzung zurück), `verbindet`, `gestoert`. Sprache wird per
+Pegel erkannt (etwa −50 dBFS), damit Stille keinen Fehlalarm auslöst.
+
+**Testschalter:** `GEMINI_TESTSTOERUNG_NACH_S=<Sekunden>` simuliert nach dieser
+Zeit einen Abbruch 1011 mit dem Guthaben-Grund. Optional
+`GEMINI_TESTSTOERUNG_CODE` und `GEMINI_TESTSTOERUNG_GRUND`. Ohne gesetzte
+Variable wirkungslos. **Nie im Produktivbetrieb setzen.**
+
+**Bekannte Upstream-Schwäche, nicht behoben:** Beim Sprachwechsel melden
+`LanguageSelector` und die Hörerseite den Hörer beide ab, der
+`subscriberCount` kann dadurch doppelt sinken. Für den neuen Stopp-Knopf ist
+das abgefangen; der Sprachwechsel selbst gehört zu T-08.
 
 ---
 

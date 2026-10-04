@@ -63,19 +63,23 @@ Antwort:
   "status": "sendet",
   "connected": true,
   "sending": true,
-  "paused": false
+  "paused": false,
+  "stoerungen": []
 }
 ```
 
 | `status` | Bedeutung |
 | :--- | :--- |
 | `getrennt` | Die Broadcast-Seite ist nicht offen. Tasten wirken nicht. |
+| `fehler` | **Mindestens eine Übersetzung ist ausgefallen**, obwohl gesendet wird — etwa weil das Gemini-Guthaben erschöpft ist. Der Grund steht im Feld `stoerungen`. |
 | `bereit` | Seite offen, es wird noch nicht gesendet. |
 | `sendet` | Übertragung läuft. |
 | `pausiert` | Ton angehalten, Sitzung läuft weiter. |
 
-Für eine Companion-Rückmeldung das Feld `status` abfragen und auf diese vier
-Werte prüfen. `connected` eignet sich gut als Warnung: Steht es auf `false`,
+Für eine Companion-Rückmeldung das Feld `status` abfragen und auf diese fünf
+Werte prüfen. **`fehler` sollte die Taste rot färben** — das ist der Fall, in
+dem die Sendeseite selbst einwandfrei aussieht, die Besucher aber nichts mehr
+hören. `connected` eignet sich gut als Warnung: Steht es auf `false`,
 wurde vergessen, die Broadcast-Seite zu öffnen.
 
 Die Abfrage kann bedenkenlos jede Sekunde laufen — sie ist sehr leichtgewichtig

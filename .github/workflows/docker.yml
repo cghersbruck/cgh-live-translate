@@ -59,7 +59,7 @@ jobs:
       # Annotationen, die niemand mehr liest. Dann faellt ein echter Fehler in
       # unserem Code nicht mehr auf. Deshalb dieser Zuschnitt.
       - name: Lint (nur eigener Code)
-        run: npx eslint src/config src/components src/lib/broadcast-control.ts src/app/api/control scripts --no-error-on-unmatched-pattern
+        run: npx eslint src/config src/components src/lib/broadcast-control.ts src/lib/gemini-stoerung.ts src/app/api/control scripts --no-error-on-unmatched-pattern
 
       - name: Produktionsbuild
         run: npm run build

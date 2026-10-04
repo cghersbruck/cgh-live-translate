@@ -40,6 +40,9 @@ export default function LanguageSelector({
 }: LanguageSelectorProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Gescheiterte Anforderung, die in einer Minute wiederholt wird. Neues
+  // Objekt bei jedem Fehlschlag, damit der Effekt auch beim zweiten Mal greift.
+  const [wiederholung, setWiederholung] = useState<{ sprache: string; nr: number } | null>(null);
   const activeLanguageRef = useRef(currentLanguage);
 
   // Keep ref in sync with current language
@@ -75,6 +78,7 @@ export default function LanguageSelector({
       setError(null);
 
       if (langCode === "original") {
+        setWiederholung(null);
         // Unsubscribe from the current translation
         if (previousLanguage && previousLanguage !== "original") {
           fetch("/api/translate", {
@@ -110,11 +114,15 @@ export default function LanguageSelector({
         }
 
         onLanguageChange(langCode, data.translatorIdentity);
+        setWiederholung(null);
       } catch (err) {
         // Besucher sollen keine technischen Meldungen sehen. Der Originaltext
         // landet in der Konsole, die Anzeige bleibt verstaendlich.
         console.error("[LanguageSelector]", err);
-        setError("Die Übersetzung ist gerade nicht erreichbar. Bitte noch einmal versuchen.");
+        setError("Die Übersetzung ist gerade nicht erreichbar. Neuer Versuch in einer Minute.");
+        // Selbstheilung: Ist der Grund behoben (etwa Guthaben aufgeladen),
+        // kommt der Hoerer ohne eigenes Zutun wieder rein.
+        setWiederholung({ sprache: langCode, nr: Date.now() });
         console.error("Translation request error:", err);
       } finally {
         setLoading(false);
@@ -122,6 +130,18 @@ export default function LanguageSelector({
     },
     [sessionId, onLanguageChange]
   );
+
+  useEffect(() => {
+    if (!wiederholung) return;
+    const timer = setTimeout(() => {
+      // Ein kuenstliches Change-Ereignis wiederverwendet den vorhandenen Pfad,
+      // statt die Anforderungslogik zu duplizieren.
+      handleChange({
+        target: { value: wiederholung.sprache },
+      } as React.ChangeEvent<HTMLSelectElement>);
+    }, 60_000);
+    return () => clearTimeout(timer);
+  }, [wiederholung, handleChange]);
 
   const currentLang = getLanguageByCode(currentLanguage);
 

@@ -33,7 +33,26 @@ interface TranslationInfo {
   translatorIdentity: string;
   status: string;
   subscriberCount: number;
+  // Ergaenzt fuer die Ausfallerkennung (siehe ANPASSUNGEN.md)
+  gesundheit?: string;
+  hoerer?: number;
+  stoerung?: { text: string; seit: number; versuche: number } | null;
 }
+
+/**
+ * Anzeige je Zustand. Bewusst aus dem Audiofluss abgeleitet statt aus dem
+ * Statusfeld: "active" blieb am 2026-10-04 gruen, waehrend die Uebersetzung
+ * wegen erschoepften Guthabens laengst ausgefallen war.
+ */
+const GESUNDHEIT_ANZEIGE: Record<string, { text: string; klasse: string }> = {
+  gesund: { text: "Übersetzt", klasse: "active" },
+  pausiert: { text: "Wartet auf Sprache", klasse: "waiting" },
+  verbindet: { text: "Verbindet …", klasse: "waiting" },
+  startet: { text: "Startet …", klasse: "waiting" },
+  stockend: { text: "Keine Übersetzung seit 20 s", klasse: "error" },
+  gestoert: { text: "Gestört", klasse: "error" },
+  beendet: { text: "Beendet", klasse: "waiting" },
+};
 
 function BroadcastControls({
   sessionId,
@@ -461,6 +480,40 @@ function BroadcastControls({
         <p className="mono">{sessionId}</p>
       </div>
 
+      {/* Stoerungsbanner. Nicht zu uebersehen, mit Grund in Klartext. */}
+      {translations.some((t) => t.gesundheit === "gestoert") && (
+        <div
+          role="alert"
+          style={{
+            margin: "0 0 24px",
+            padding: "16px 20px",
+            background: "var(--error-soft)",
+            border: "2px solid var(--error)",
+            borderRadius: 6,
+            textAlign: "left",
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: 6, color: "var(--error)" }}>
+            Übersetzung ausgefallen
+          </strong>
+          {translations
+            .filter((t) => t.gesundheit === "gestoert")
+            .map((t) => (
+              <p key={t.language} className="body-sm" style={{ margin: "4px 0" }}>
+                <strong>{getLanguageByCode(t.language)?.name ?? t.language}:</strong>{" "}
+                {t.stoerung?.text ?? "unbekannter Grund"}
+                {t.stoerung?.seit
+                  ? ` · seit ${new Date(t.stoerung.seit).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`
+                  : ""}
+              </p>
+            ))}
+          <p className="body-sm" style={{ margin: "8px 0 0", opacity: 0.75 }}>
+            Es wird jede Minute automatisch ein neuer Versuch gestartet, solange
+            jemand zuhört.
+          </p>
+        </div>
+      )}
+
       {/* Fernsteuerung durch Bitfocus Companion. Die gesamte Logik liegt in
           der Komponente, damit diese Upstream-Datei moeglichst wenig abweicht. */}
       <CompanionControl
@@ -504,6 +557,27 @@ function BroadcastControls({
               <span className={`status-dot ${isAudioActive ? "pulse" : ""}`} />
               {statusText}
             </span>
+
+            {/* Pause haelt nur den Ton an; Eingaenge und Uebersetzungs-
+                Sitzungen bleiben bestehen. Gedacht fuer Lobpreis und
+                Moderation - lange Pausen beim Modell loesen ausserdem die
+                dokumentierten Stimmwechsel aus. */}
+            {isAudioActive && (
+              <button
+                onClick={() => setIsPaused((p) => !p)}
+                className="btn"
+                style={{
+                  marginLeft: 12,
+                  padding: "8px 16px",
+                  fontSize: "12px",
+                  border: isPaused ? "none" : "1px solid var(--warning)",
+                  background: isPaused ? "var(--fg)" : "transparent",
+                  color: isPaused ? "var(--bg)" : "var(--warning)",
+                }}
+              >
+                {isPaused ? "▶ Weiter" : "❚❚ Pause"}
+              </button>
+            )}
 
             {isWakeLockActive && (
               <span
@@ -681,12 +755,24 @@ function BroadcastControls({
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <span className="lang-meta">
-                    {t.subscriberCount} listener{t.subscriberCount !== 1 ? "s" : ""}
+                    {/* hoerer zaehlt die tatsaechlich verbundenen Teilnehmer;
+                        subscriberCount bleibt bei hart beendeten Browsern stehen. */}
+                    {t.hoerer ?? t.subscriberCount} Hörer
                   </span>
-                  <span className={`status status--${t.status === "active" ? "active" : "waiting"}`}>
-                    <span className="status-dot pulse" />
-                    {t.status}
-                  </span>
+                  {(() => {
+                    const a =
+                      GESUNDHEIT_ANZEIGE[t.gesundheit ?? ""] ??
+                      { text: t.status, klasse: t.status === "active" ? "active" : "waiting" };
+                    return (
+                      <span
+                        className={`status status--${a.klasse}`}
+                        title={t.stoerung?.text}
+                      >
+                        <span className="status-dot pulse" />
+                        {a.text}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
             );

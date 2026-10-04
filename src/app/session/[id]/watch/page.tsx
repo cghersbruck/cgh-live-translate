@@ -27,6 +27,8 @@ import "@livekit/components-styles";
 import { Track, RoomEvent } from "livekit-client";
 import LanguageSelector from "./components/LanguageSelector";
 import TonStarten from "@/components/TonStarten";
+import { getLanguageByCode } from "@/lib/languages";
+import { getNativeLanguageName } from "@/config/gemeinde";
 
 interface TranscriptEntry {
   id: string;
@@ -68,7 +70,19 @@ function splitIntoParagraphs(text: string, sentencesPerParagraph = 2): string[] 
   return paragraphs;
 }
 
-function AttendeeView({ sessionId }: { sessionId: string }) {
+function AttendeeView({
+  sessionId,
+  onStop,
+  stumm,
+  onStummChange,
+}: {
+  sessionId: string;
+  /** Zurueck zur Startansicht des Hoerers. */
+  onStop: () => void;
+  /** Wiedergabe stummgeschaltet (Pause vom Sperrbildschirm). */
+  stumm: boolean;
+  onStummChange: (stumm: boolean) => void;
+}) {
   const room = useRoomContext();
   const [currentLanguage, setCurrentLanguage] = useState("original");
   const [translatorIdentity, setTranslatorIdentity] = useState<string | null>(
@@ -404,6 +418,110 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
     };
   }, [room]);
 
+  // --- Beenden (Anpassung, siehe ANPASSUNGEN.md) -------------------------
+  //
+  // Genau EINE Abmeldung senden. Sowohl diese Ansicht als auch der
+  // LanguageSelector melden beim Unmount ab. Ohne Vorkehrung wuerde der Hoerer
+  // doppelt abgezogen - und koennte damit die Bridge eines anderen Hoerers
+  // derselben Sprache mit abbauen. Deshalb erst die Sprache auf "original"
+  // setzen, und erst wenn das in allen Refs angekommen ist, wirklich beenden.
+  const [beenden, setBeenden] = useState(false);
+  const handleStop = useCallback(() => {
+    const lang = currentLanguageRef.current;
+    if (lang && lang !== "original") {
+      navigator.sendBeacon(
+        "/api/translate/unsubscribe",
+        new Blob([JSON.stringify({ sessionId, targetLanguage: lang })], {
+          type: "application/json",
+        })
+      );
+    }
+    currentLanguageRef.current = "original";
+    setCurrentLanguage("original");
+    setBeenden(true);
+  }, [sessionId]);
+
+  useEffect(() => {
+    // Kind-Effekte (LanguageSelector) laufen vor diesem - dessen Ref steht
+    // hier also bereits auf "original".
+    if (beenden && currentLanguage === "original") onStop();
+  }, [beenden, currentLanguage, onStop]);
+
+  // --- Media Session -----------------------------------------------------
+  //
+  // Meldet die Seite dem Betriebssystem als Medienwiedergabe. Ziel: Ton laeuft
+  // bei gesperrtem Bildschirm weiter, mit Steuerung auf dem Sperrbildschirm -
+  // statt den Bildschirm wachzuhalten und Akku zu verbrauchen. Ob iOS bzw.
+  // Android die Seite damit tatsaechlich weiterlaufen lassen, muss am Geraet
+  // gemessen werden.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
+      console.log("[MediaSession] nicht verfuegbar");
+      return;
+    }
+    const ms = navigator.mediaSession;
+    const lang = getLanguageByCode(currentLanguage);
+    const sprachName =
+      currentLanguage === "original"
+        ? "Original"
+        : getNativeLanguageName(currentLanguage, lang?.name ?? currentLanguage);
+
+    ms.metadata = new MediaMetadata({
+      title: "Live-Übersetzung",
+      artist: sprachName,
+      album: "Gottesdienst",
+    });
+    ms.playbackState = stumm ? "paused" : "playing";
+
+    const setzen = (a: MediaSessionAction, h: MediaSessionActionHandler | null) => {
+      try {
+        ms.setActionHandler(a, h);
+      } catch {
+        // Nicht jeder Browser kennt jede Aktion.
+      }
+    };
+    setzen("play", () => onStummChange(false));
+    setzen("pause", () => onStummChange(true));
+    setzen("stop", () => handleStop());
+
+    return () => {
+      setzen("play", null);
+      setzen("pause", null);
+      setzen("stop", null);
+      ms.metadata = null;
+    };
+  }, [currentLanguage, stumm, onStummChange, handleStop]);
+
+  // --- Stoerungshinweis ----------------------------------------------------
+  //
+  // Faellt die Uebersetzung aus, soll niemand minutenlang an seinem Kopfhoerer
+  // zweifeln. Bewusst ohne den Grund - "Guthaben erschoepft" geht Besucher
+  // nichts an.
+  const [gestoerteSprache, setGestoerteSprache] = useState<string | null>(null);
+  useEffect(() => {
+    if (currentLanguage === "original") return;
+    let aktiv = true;
+    const pruefen = async () => {
+      try {
+        const res = await fetch(`/api/translate/status?sessionId=${sessionId}`);
+        const data = await res.json();
+        const t = (data.translations ?? []).find(
+          (x: { language: string; gesundheit?: string }) => x.language === currentLanguage
+        );
+        if (aktiv) setGestoerteSprache(t?.gesundheit === "gestoert" ? currentLanguage : null);
+      } catch {
+        // Kurzer Netzaussetzer am Handy - naechste Runde abwarten.
+      }
+    };
+    pruefen();
+    const intervall = setInterval(pruefen, 15000);
+    return () => {
+      aktiv = false;
+      clearInterval(intervall);
+    };
+  }, [currentLanguage, sessionId]);
+  const unterbrochen = currentLanguage !== "original" && gestoerteSprache === currentLanguage;
+
   return (
     <div className="container enter">
       {/* Header */}
@@ -412,7 +530,30 @@ function AttendeeView({ sessionId }: { sessionId: string }) {
           <em>Übersetzung</em>
         </h1>
         <p className="mono">{sessionId}</p>
+        <button
+          onClick={handleStop}
+          className="btn btn-outline"
+          style={{ marginTop: 16, padding: "10px 20px", fontSize: 14 }}
+        >
+          ■ Beenden
+        </button>
       </div>
+
+      {unterbrochen && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 24,
+            padding: "14px 18px",
+            background: "var(--warning-soft)",
+            border: "1px solid var(--warning)",
+            borderRadius: 6,
+          }}
+        >
+          Die Übersetzung ist gerade unterbrochen. Sie startet von selbst wieder —
+          diese Seite einfach geöffnet lassen.
+        </div>
+      )}
 
       {/* Status */}
       <div style={{ marginBottom: 32 }}>
@@ -606,6 +747,12 @@ export default function WatchPage({
   const [livekitUrl, setLivekitUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  // Pause vom Sperrbildschirm. Liegt hier, weil RoomAudioRenderer hier sitzt.
+  const [stumm, setStumm] = useState(false);
+  const beenden = useCallback(() => {
+    setStumm(false);
+    setStarted(false);
+  }, []);
 
   useEffect(() => {
     async function fetchToken() {
@@ -672,7 +819,25 @@ export default function WatchPage({
           </p>
           <button
             className="btn"
-            onClick={() => setStarted(true)}
+            onClick={() => {
+              // Audio Session API (Safari 16.4+): als Wiedergabe statt als
+              // Umgebungston einstufen. Kann iOS dazu bringen, den Ton bei
+              // gesperrtem Bildschirm weiterzuspielen - wird hier im Klick
+              // gesetzt, weil Safari Audioentscheidungen an Nutzergesten bindet.
+              const as = (navigator as unknown as { audioSession?: { type: string } })
+                .audioSession;
+              if (as) {
+                try {
+                  as.type = "playback";
+                  console.log("[AudioSession] type=playback gesetzt");
+                } catch (err) {
+                  console.warn("[AudioSession] nicht setzbar:", err);
+                }
+              } else {
+                console.log("[AudioSession] nicht verfuegbar");
+              }
+              setStarted(true);
+            }}
           >
             Übersetzung anhören
           </button>
@@ -700,10 +865,15 @@ export default function WatchPage({
           width: "100%",
         }}
       >
-        <RoomAudioRenderer />
+        <RoomAudioRenderer muted={stumm} />
         {/* Muss innerhalb von LiveKitRoom stehen, da es den Room-Kontext braucht. */}
         <TonStarten />
-        <AttendeeView sessionId={sessionId} />
+        <AttendeeView
+          sessionId={sessionId}
+          onStop={beenden}
+          stumm={stumm}
+          onStummChange={setStumm}
+        />
       </LiveKitRoom>
     </div>
   );

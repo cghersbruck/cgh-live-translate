@@ -281,6 +281,44 @@ das Log — deshalb ist die Spalte „Hörbar?" der eigentliche Maßstab.
 
 ---
 
+## Vorfall 2026-10-04: Ausfall gegen Ende des Gottesdienstes
+
+Live-Test über den ganzen Gottesdienst, zwei Sprachen, eigener Docker-Host.
+
+| Beobachtung | Bewertung |
+| :--- | :--- |
+| Stimmwechsel alle 2–5 Minuten (Mann/Frau, andere Sprecher) | **Dokumentiertes Modellverhalten**, laut Google: „Voice replication can be inconsistent", Stimmen wechseln nach längeren Pausen. Eine feste Stimme ist beim Translate-Modell nicht einstellbar. Akzeptiert; Dämpfung über Pause-Knopf in Lobpreis und Moderation. |
+| Pause/Weiter fehlte auf der Sendeseite | behoben |
+| Hörer-Verbindung bricht bei gesperrtem Bildschirm ab | Media Session + Audio Session eingebaut, **Messung am Gerät steht aus** (T-13) |
+| Übersetzung tot, Sendeseite grün | Ursache: Gemini-Guthaben erschöpft (1011). Ausfallerkennung gebaut, siehe ANPASSUNGEN.md |
+
+### Test der Ausfallerkennung (2026-10-04, lokal)
+
+**Lauf 1 — Ausfall im Betrieb mit Testschalter (40 s):**
+
+```
++  4 s  Bridge aktiv, gesundheit=pausiert, 1 Hörer
++ 46 s  Testschalter: 1011 "credits depleted" -> gestoert,
+        "Gemini-Guthaben erschöpft. In AI Studio aufladen."
++107 s  Erholungsversuch genau 60 s später -> wiederhergestellt
+```
+
+**Lauf 2 — Startfehler mit ungültigem Schlüssel:**
+
+| Schritt | Ergebnis |
+| :--- | :--- |
+| Erste Anforderung | HTTP 500, Störung erfasst: „Gemini-Zugang abgelehnt", endgültig |
+| Companion-Status | `fehler`, mit Grund |
+| Sofortige Wiederholungen | HTTP 503 in 16–17 ms **ohne Anfrage an Gemini** (Schonfrist) |
+| Nach 52 s | echter Neuversuch, Zähler steigt auf 2 |
+| Log | Stacktrace nur für die zwei echten Versuche, Schlüssel nicht im Log |
+
+**Nicht automatisiert getestet:** das Wiederholbudget von 2 Minuten bei
+anhaltend vorübergehenden Fehlern (dafür bräuchte es einen Server, der
+wiederholt mit 1006 abbricht). Die Logik ist einfach; Prüfung über T-17.
+
+---
+
 ## Übrige Tests
 
 Alle noch offen. Werden erst nach Abschluss von T-10 und Phase 2 durchgeführt.
@@ -290,7 +328,7 @@ Alle noch offen. Werden erst nach Abschluss von T-10 und Phase 2 durchgeführt.
 | T-09 | Dauerlauf 60 Minuten mit echtem Predigtmaterial | Keine Abbrüche, keine Audio-Lücke über 3 s | offen |
 | T-11 | Zitat in der Zielsprache (englischer Satz bei Zielsprache Englisch) | Modell schweigt nicht, gibt das Zitat wieder | offen |
 | T-12 | Lobpreis und Musik bei aktiver Übersetzung | Prüfen, ob Artefakte entstehen — daraus ergibt sich, ob ein Stopp-Knopf nötig ist | offen |
-| T-13 | iPhone mit gesperrtem Bildschirm, 20 Minuten | Ton läuft weiter — oder das Gegenteil ist dokumentiert | offen |
+| T-13 | iPhone mit gesperrtem Bildschirm, 20 Minuten | Ton läuft weiter — oder das Gegenteil ist dokumentiert. **Neu zu prüfen:** Erscheint die Steuerung „Live-Übersetzung" auf dem Sperrbildschirm? Funktioniert Pause/Play dort? Konsole: `[AudioSession]`/`[MediaSession]` zeigen, was der Browser unterstützt. Dasselbe auf Android. | offen |
 | T-14 | Zwei Sprachen gleichzeitig, je zwei Hörer | Beide Bridges stabil, keine gegenseitige Störung | offen |
 | T-15 | Hörer verlässt und kommt zurück | Bridge korrekt abgebaut und wieder aufgebaut, kein Session-Leak | offen |
 | T-16 | `systemInstruction` mit Glossar | Wirkt es oder wird es ignoriert? Keine Zusage vor der Messung. | offen |

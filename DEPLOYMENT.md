@@ -127,6 +127,14 @@ docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revisi
 Das Ergebnis mit dem neuesten Commit auf `main` vergleichen. Stimmen sie nicht
 überein, läuft ein alter Stand — siehe Stolpersteine.
 
+### Störungen im Log finden
+
+Jeder Ausfall der Übersetzung erzeugt genau eine auffindbare Zeile:
+
+```bash
+docker logs cgh-live-translate 2>&1 | grep -E "STOERUNG|wiederhergestellt"
+```
+
 ### Aktualisieren
 
 ```bash

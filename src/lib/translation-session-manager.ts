@@ -23,13 +23,37 @@
  *   const bridge = await manager.getOrCreate(sessionId, targetLanguage, organizerIdentity);
  */
 
-import { TranslationBridge, BridgeStatus } from "./translation-bridge";
+import { TranslationBridge, BridgeStatus, Gesundheit } from "./translation-bridge";
+import { ausFehler, klassifiziere, klartext, type Stoerung } from "./gemini-stoerung";
+
+/**
+ * Nach einem endgueltigen Fehler (etwa erschoepftem Guthaben) wird so lange
+ * jede neue Anforderung dieser Sprache sofort mit dem bekannten Grund
+ * beantwortet, ohne Gemini erneut anzufragen. Etwas kuerzer als der
+ * 60-s-Neuversuch der Hoererseite, damit dieser sicher durchkommt.
+ */
+const SCHONFRIST_MS = 50_000;
+
+/** Fehler, der eine bekannte Stoerung an die API-Route weiterreicht. */
+export class StoerungsFehler extends Error {
+  public readonly stoerung: Stoerung;
+  constructor(stoerung: Stoerung) {
+    super(stoerung.text);
+    this.name = "StoerungsFehler";
+    this.stoerung = stoerung;
+  }
+}
 
 export interface TranslationInfo {
   language: string;
   translatorIdentity: string;
   status: BridgeStatus;
   subscriberCount: number;
+  /** Aus dem Audiofluss abgeleiteter Zustand, siehe TranslationBridge. */
+  gesundheit: Gesundheit;
+  /** Tatsaechlich verbundene Hoerer laut LiveKit. */
+  hoerer: number;
+  stoerung: Stoerung | null;
 }
 
 export interface SessionInfo {
@@ -50,6 +74,25 @@ class TranslationSessionManager {
 
   // Map<sessionId, SessionInfo>
   private sessions: Map<string, SessionInfo> = new Map();
+  // Stoerungen je Session und Sprache. Ueberleben den Abbau der Bridge, damit
+  // sichtbar bleibt, WARUM eine Sprache weg ist.
+  private stoerungen: Map<string, Map<string, Stoerung>> = new Map();
+
+  private stoerungMerken(sessionId: string, sprache: string, s: Stoerung): void {
+    let m = this.stoerungen.get(sessionId);
+    if (!m) {
+      m = new Map();
+      this.stoerungen.set(sessionId, m);
+    }
+    m.set(sprache, s);
+  }
+
+  private stoerungLoeschen(sessionId: string, sprache: string): void {
+    const m = this.stoerungen.get(sessionId);
+    if (!m) return;
+    m.delete(sprache);
+    if (m.size === 0) this.stoerungen.delete(sessionId);
+  }
 
   private constructor() {}
 
@@ -112,6 +155,18 @@ class TranslationSessionManager {
       }
     }
 
+    // Bekannte endgueltige Stoerung: innerhalb der Schonfrist nicht erneut bei
+    // Gemini anklopfen. Am 2026-10-04 erzeugten wiederholte Anforderungen rund
+    // 500 abgelehnte Anfragen.
+    const bekannt = this.stoerungen.get(sessionId)?.get(targetLanguage);
+    if (
+      bekannt &&
+      bekannt.art === "endgueltig" &&
+      Date.now() - bekannt.zuletzt < SCHONFRIST_MS
+    ) {
+      throw new StoerungsFehler(bekannt);
+    }
+
     // Create a new bridge
     console.log(
       `[SessionManager] Creating new bridge for ${targetLanguage} in session ${sessionId}`
@@ -149,6 +204,9 @@ class TranslationSessionManager {
       config
     );
 
+    bridge.onStoerung = (s) => this.stoerungMerken(sessionId, targetLanguage, s);
+    bridge.onWiederhergestellt = () => this.stoerungLoeschen(sessionId, targetLanguage);
+
     bridge.onStop = () => {
       const languageMap = this.translations.get(sessionId);
       if (languageMap) {
@@ -172,25 +230,62 @@ class TranslationSessionManager {
     try {
       await bridge.start();
       bridge.subscriberCount = 1;
+      this.stoerungLoeschen(sessionId, targetLanguage);
       return bridge;
     } catch (error) {
       // Clean up on failure
       languageMap.delete(targetLanguage);
+
+      // Grund festhalten, damit die Sendeseite ihn anzeigen kann.
+      const { code, grund } = ausFehler(error);
+      const vorher = this.stoerungen.get(sessionId)?.get(targetLanguage);
+      const jetzt = Date.now();
+      const stoerung: Stoerung = {
+        code,
+        grund,
+        text: klartext(code, grund),
+        art: klassifiziere(code, grund),
+        seit: vorher?.seit ?? jetzt,
+        zuletzt: jetzt,
+        versuche: (vorher?.versuche ?? 0) + 1,
+      };
+      this.stoerungMerken(sessionId, targetLanguage, stoerung);
+      console.error(
+        `[SessionManager] STOERUNG beim Start von ${targetLanguage}: ${stoerung.text}`,
+        { code, grund, art: stoerung.art, versuche: stoerung.versuche }
+      );
       throw error;
     }
   }
 
   getActiveTranslations(sessionId: string): TranslationInfo[] {
     const languageMap = this.translations.get(sessionId);
-    if (!languageMap) return [];
-
     const result: TranslationInfo[] = [];
-    for (const [language, bridge] of languageMap) {
+
+    for (const [language, bridge] of languageMap ?? []) {
       result.push({
         language,
         translatorIdentity: bridge.identity,
         status: bridge.status,
         subscriberCount: bridge.subscriberCount,
+        gesundheit: bridge.gesundheit,
+        hoerer: bridge.anzahlHoerer(),
+        stoerung: bridge.stoerung,
+      });
+    }
+
+    // Sprachen, deren Start gescheitert ist, haben keine Bridge mehr - sie
+    // sollen trotzdem als gestoert sichtbar sein.
+    for (const [language, stoerung] of this.stoerungen.get(sessionId) ?? []) {
+      if (languageMap?.has(language)) continue;
+      result.push({
+        language,
+        translatorIdentity: `translator-${language}`,
+        status: "error",
+        subscriberCount: 0,
+        gesundheit: "gestoert",
+        hoerer: 0,
+        stoerung,
       });
     }
     return result;
@@ -258,6 +353,7 @@ class TranslationSessionManager {
       this.translations.delete(sessionId);
     }
     this.sessions.delete(sessionId);
+    this.stoerungen.delete(sessionId);
     console.log(
       `[SessionManager] Removed all bridges and session for ${sessionId}`
     );

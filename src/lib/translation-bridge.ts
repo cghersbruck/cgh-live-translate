@@ -40,8 +40,42 @@ import {
   AudioStream,
 } from "@livekit/rtc-node";
 import WebSocket from "ws";
+import {
+  GeminiCloseError,
+  klassifiziere,
+  klartext,
+  type Stoerung,
+  type StoerungsArt,
+} from "./gemini-stoerung";
 
 export type BridgeStatus = "starting" | "active" | "error" | "closed";
+
+/**
+ * Tatsaechlicher Zustand, abgeleitet aus dem Audiofluss statt aus einem Flag.
+ * `status === "active"` sagt nur "wurde einmal gestartet" - bei einer haengenden
+ * Wiederverbindung blieb er gruen, waehrend nichts mehr uebersetzt wurde.
+ */
+export type Gesundheit =
+  | "startet"
+  | "gesund"
+  | "verbindet"
+  | "stockend"
+  | "pausiert"
+  | "gestoert"
+  | "beendet";
+
+/** Wiederholen nach einem behebbaren Abbruch: 1 s, 2 s, 5 s ... 30 s. */
+const BACKOFF_MS = [1000, 2000, 5000, 10000, 20000, 30000];
+/** So lange wird ein behebbarer Ausfall ueberbrueckt, dann gilt er als Stoerung. */
+const WIEDERHOL_BUDGET_MS = 120_000;
+/** Takt der Erholungsversuche waehrend einer Stoerung, solange jemand zuhoert. */
+const ERHOLUNG_MS = 60_000;
+/** Ohne Rueckkanal so lange, obwohl gesprochen wird -> "stockend". */
+const STOCKEND_NACH_MS = 20_000;
+/** Ohne Sprache am Eingang so lange -> "pausiert" (Lobpreis, Pause). */
+const PAUSIERT_NACH_MS = 5_000;
+/** Pegel, ab dem ein Eingangsframe als Sprache zaehlt: etwa -50 dBFS. */
+const SPRACHSCHWELLE = 100;
 
 export class TranslationBridge {
   private room: Room | null = null;
@@ -83,6 +117,20 @@ export class TranslationBridge {
   private lastAudioFrameTime: number = 0;
   private captureChain: Promise<void> = Promise.resolve();
 
+  // --- Ausfallerkennung (Anpassung, siehe ANPASSUNGEN.md) -----------------
+  /** Aktuelle Stoerung, null wenn alles laeuft. */
+  public stoerung: Stoerung | null = null;
+  public onStoerung?: (s: Stoerung) => void;
+  public onWiederhergestellt?: () => void;
+  private fehlversuche: number = 0;
+  private ausfallSeit: number = 0;
+  private fehlversucheMitHandle: number = 0;
+  private wiederholTimer: NodeJS.Timeout | null = null;
+  private letzteSprache: number = 0;
+  private spracheSeit: number = 0;
+  private verbundenSeit: number = 0;
+  private teststoerungGeplant: boolean = false;
+
   constructor(
     sessionId: string,
     targetLanguage: string,
@@ -122,9 +170,11 @@ export class TranslationBridge {
       await this.subscribeToOrganizer();
 
       this.status = "active";
+      this.verbundenSeit = Date.now();
       console.log(
         `[TranslationBridge:${this.targetLanguage}] Bridge is active`
       );
+      this.teststoerungPlanen();
     } catch (error) {
       console.error(
         `[TranslationBridge:${this.targetLanguage}] Failed to start:`,
@@ -142,6 +192,11 @@ export class TranslationBridge {
       `[TranslationBridge:${this.targetLanguage}] Stopping bridge`
     );
     this.status = "closed";
+
+    if (this.wiederholTimer) {
+      clearTimeout(this.wiederholTimer);
+      this.wiederholTimer = null;
+    }
 
     if (this.interimTimeout) {
       clearTimeout(this.interimTimeout);
@@ -290,14 +345,13 @@ export class TranslationBridge {
           { code, reason: reasonStr }
         );
         if (!this.geminiSetupComplete) {
-          reject(new Error(`Gemini WebSocket closed before setup: code=${code} reason=${reasonStr}`));
+          // Typisiert, damit der Session-Manager Code und Grund einstufen kann.
+          reject(new GeminiCloseError(code, reasonStr));
         } else if (this.status === "active") {
-          // Auto-reconnect on GoAway or unexpected closure
-          console.log(
-            `[TranslationBridge:${this.targetLanguage}] Reconnecting Gemini WebSocket...`
-          );
+          // Nicht mehr blind wiederverbinden: erst einstufen. Ein erschoepftes
+          // Guthaben loest sich durch Wiederholen nicht.
           this.geminiSetupComplete = false;
-          this.reconnectGemini();
+          this.beiVerbindungsabbruch(code, reasonStr);
         }
       });
 
@@ -322,6 +376,10 @@ export class TranslationBridge {
   /**
    * Reconnect the Gemini WebSocket after a GoAway or unexpected closure.
    * Reuses the existing LiveKit room + audio pipeline.
+   *
+   * Angepasst: Ein gescheiterter Versuch fuehrt nicht mehr in eine
+   * Endlosschleife, sondern ueber versuchGescheitert() in begrenztes
+   * Wiederholen bzw. in eine sichtbare Stoerung.
    */
   private async reconnectGemini(): Promise<void> {
     if (this.isReconnecting) {
@@ -330,7 +388,12 @@ export class TranslationBridge {
       );
       return;
     }
+    if (this.status !== "active" || this.stopping) return;
     this.isReconnecting = true;
+    if (this.wiederholTimer) {
+      clearTimeout(this.wiederholTimer);
+      this.wiederholTimer = null;
+    }
 
     try {
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.geminiApiKey}`;
@@ -338,8 +401,20 @@ export class TranslationBridge {
         `[TranslationBridge:${this.targetLanguage}] Reconnecting Gemini WebSocket with handle: ${this.resumptionHandle || "none"}...`
       );
 
-      const nextWs = new WebSocket(wsUrl);
+      // handshakeTimeout: Ohne ihn kann ein Verbindungsaufbau unbegrenzt haengen,
+      // und dann kommt nie ein close-Ereignis, das den naechsten Versuch ausloest.
+      const nextWs = new WebSocket(wsUrl, { handshakeTimeout: 15000 });
       let nextSetupComplete = false;
+
+      // Offen, aber kein setupComplete: gilt ebenfalls als gescheitert.
+      const setupTimer = setTimeout(() => {
+        if (!nextSetupComplete) {
+          console.warn(
+            `[TranslationBridge:${this.targetLanguage}] Gemini reconnect setup timeout`
+          );
+          nextWs.terminate();
+        }
+      }, 15000);
 
       nextWs.on("open", () => {
         console.log(
@@ -357,19 +432,23 @@ export class TranslationBridge {
                 `[TranslationBridge:${this.targetLanguage}] Gemini reconnect setup complete`
               );
               nextSetupComplete = true;
+              clearTimeout(setupTimer);
               this.geminiSetupComplete = true;
 
               const oldWs = this.geminiWs;
               this.geminiWs = nextWs;
               this.isReconnecting = false;
 
-              if (oldWs) {
+              if (oldWs && oldWs !== nextWs) {
                 console.log(
                   `[TranslationBridge:${this.targetLanguage}] Gracefully closing old Gemini WebSocket`
                 );
                 oldWs.removeAllListeners();
                 oldWs.close();
               }
+
+              this.verbundenSeit = Date.now();
+              this.wiederhergestellt();
               return;
             }
           }
@@ -390,26 +469,21 @@ export class TranslationBridge {
       });
 
       nextWs.on("close", (code: number, reason: Buffer) => {
+        clearTimeout(setupTimer);
         const reasonStr = reason.toString();
         console.log(
           `[TranslationBridge:${this.targetLanguage}] Gemini reconnect WebSocket closed`,
           { code, reason: reasonStr }
         );
 
-        if (this.geminiWs === nextWs) {
-          this.geminiSetupComplete = false;
-          if (this.status === "active") {
-            setTimeout(() => {
-              this.reconnectGemini();
-            }, 1000);
-          }
-        } else {
+        if (!nextSetupComplete) {
+          // Versuch gescheitert, bevor die neue Verbindung uebernommen wurde.
           this.isReconnecting = false;
-          if (this.status === "active") {
-            setTimeout(() => {
-              this.reconnectGemini();
-            }, 2000);
-          }
+          this.versuchGescheitert(code, reasonStr);
+        } else if (this.geminiWs === nextWs) {
+          // Die laufende Verbindung ist abgebrochen.
+          this.geminiSetupComplete = false;
+          this.beiVerbindungsabbruch(code, reasonStr);
         }
       });
     } catch (error) {
@@ -418,12 +492,237 @@ export class TranslationBridge {
         error
       );
       this.isReconnecting = false;
-      if (this.status === "active") {
-        setTimeout(() => {
-          this.reconnectGemini();
-        }, 5000);
+      this.versuchGescheitert(
+        null,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Ausfallerkennung (Anpassung, siehe ANPASSUNGEN.md)
+  // ---------------------------------------------------------------------
+
+  /** Eine laufende Verbindung ist abgebrochen. */
+  private beiVerbindungsabbruch(code: number | null, grund: string): void {
+    if (this.status !== "active" || this.stopping) return;
+    const art = klassifiziere(code, grund);
+    console.warn(
+      `[TranslationBridge:${this.targetLanguage}] Verbindungsabbruch`,
+      { code, grund, art }
+    );
+
+    // Vor der Verzweigung: Auch ein endgueltiger Ausfall braucht seinen
+    // Beginn, sonst meldet die Wiederherstellung "Ausfall 0 s".
+    if (!this.ausfallSeit) this.ausfallSeit = Date.now();
+    if (art === "endgueltig") {
+      this.stoerungSetzen(code, grund, art);
+      return;
+    }
+    // Erster Versuch sofort - so verhaelt sich auch der bewaehrte goAway-Pfad.
+    this.reconnectGemini();
+  }
+
+  /** Ein Wiederverbindungsversuch ist gescheitert. */
+  private versuchGescheitert(code: number | null, grund: string): void {
+    if (this.status !== "active" || this.stopping) return;
+    const art = klassifiziere(code, grund);
+    if (!this.ausfallSeit) this.ausfallSeit = Date.now();
+    this.fehlversuche++;
+
+    // Ein ungueltiger Handle wurde frueher bei jedem Versuch erneut gesendet.
+    // Nach zwei Fehlschlaegen mit Handle wird frisch begonnen - der kurze
+    // Kontextverlust ist fuer Uebersetzung unerheblich.
+    if (this.resumptionHandle) {
+      this.fehlversucheMitHandle++;
+      if (this.fehlversucheMitHandle >= 2) {
+        console.warn(
+          `[TranslationBridge:${this.targetLanguage}] Resumption-Handle verworfen, naechster Versuch mit frischer Session`
+        );
+        this.resumptionHandle = null;
       }
     }
+
+    console.warn(
+      `[TranslationBridge:${this.targetLanguage}] Wiederverbindung gescheitert (Versuch ${this.fehlversuche})`,
+      { code, grund, art }
+    );
+
+    if (art === "endgueltig" || this.stoerung) {
+      // Endgueltig, oder bereits in Stoerung: nur noch im Erholungstakt.
+      this.stoerungSetzen(code, grund, art);
+      return;
+    }
+
+    const vergangen = Date.now() - this.ausfallSeit;
+    if (vergangen >= WIEDERHOL_BUDGET_MS) {
+      this.stoerungSetzen(code, grund, art);
+      return;
+    }
+
+    const pause = BACKOFF_MS[Math.min(this.fehlversuche - 1, BACKOFF_MS.length - 1)];
+    console.log(
+      `[TranslationBridge:${this.targetLanguage}] Naechster Versuch in ${pause / 1000} s (Ausfall seit ${Math.round(vergangen / 1000)} s)`
+    );
+    this.wiederholTimer = setTimeout(() => {
+      this.wiederholTimer = null;
+      this.reconnectGemini();
+    }, pause);
+  }
+
+  private stoerungSetzen(code: number | null, grund: string, art: StoerungsArt): void {
+    const jetzt = Date.now();
+    const neu = !this.stoerung;
+    this.stoerung = {
+      code,
+      grund,
+      text: klartext(code, grund),
+      art,
+      seit: this.stoerung?.seit ?? jetzt,
+      zuletzt: jetzt,
+      versuche: this.fehlversuche,
+    };
+    this.geminiSetupComplete = false;
+
+    // Eine Zeile je Stoerung, gut auffindbar mit: grep STOERUNG
+    if (neu) {
+      console.error(
+        `[TranslationBridge:${this.targetLanguage}] STOERUNG: ${this.stoerung.text}`,
+        { code, grund, art, versuche: this.fehlversuche }
+      );
+    } else {
+      console.warn(
+        `[TranslationBridge:${this.targetLanguage}] STOERUNG haelt an (${this.fehlversuche} Versuche): ${this.stoerung.text}`
+      );
+    }
+
+    this.onStoerung?.(this.stoerung);
+    this.erholungPlanen();
+  }
+
+  /**
+   * Waehrend einer Stoerung einmal pro Minute ein frischer Versuch - aber nur,
+   * solange jemand zuhoert. So laeuft es nach dem Aufladen des Guthabens von
+   * selbst wieder an, ohne die API im Sekundentakt zu belasten.
+   */
+  private erholungPlanen(): void {
+    if (this.wiederholTimer) clearTimeout(this.wiederholTimer);
+    this.wiederholTimer = setTimeout(() => {
+      this.wiederholTimer = null;
+      if (this.status !== "active" || this.stopping) return;
+      if (this.anzahlHoerer() === 0) {
+        console.log(
+          `[TranslationBridge:${this.targetLanguage}] Stoerung, aber niemand hoert zu - kein Erholungsversuch`
+        );
+        this.erholungPlanen();
+        return;
+      }
+      console.log(
+        `[TranslationBridge:${this.targetLanguage}] Erholungsversuch nach Stoerung`
+      );
+      this.resumptionHandle = null;
+      this.reconnectGemini();
+    }, ERHOLUNG_MS);
+  }
+
+  private wiederhergestellt(): void {
+    const warGestoert = !!this.stoerung;
+    if (warGestoert || this.fehlversuche > 0) {
+      const beginn = this.stoerung?.seit ?? this.ausfallSeit;
+      const dauer = beginn ? Math.round((Date.now() - beginn) / 1000) : 0;
+      console.log(
+        `[TranslationBridge:${this.targetLanguage}] Verbindung wiederhergestellt nach ${this.fehlversuche} Fehlversuchen, Ausfall ${dauer} s`
+      );
+    }
+    if (this.wiederholTimer) {
+      clearTimeout(this.wiederholTimer);
+      this.wiederholTimer = null;
+    }
+    this.stoerung = null;
+    this.fehlversuche = 0;
+    this.ausfallSeit = 0;
+    this.fehlversucheMitHandle = 0;
+    if (warGestoert) this.onWiederhergestellt?.();
+  }
+
+  /**
+   * Tatsaechlich verbundene Hoerer dieser Sprache. Massgeblich ist das
+   * Teilnehmer-Attribut in LiveKit, nicht der subscriberCount - der wird nur
+   * per sendBeacon heruntergezaehlt und bleibt bei hart beendeten Browsern
+   * stehen.
+   */
+  public anzahlHoerer(): number {
+    if (!this.room) return 0;
+    return Array.from(this.room.remoteParticipants.values()).filter(
+      (p) => p.attributes?.language === this.targetLanguage
+    ).length;
+  }
+
+  public get gesundheit(): Gesundheit {
+    if (this.status === "starting") return "startet";
+    if (this.status !== "active") return "beendet";
+    if (this.stoerung) return "gestoert";
+    if (!this.geminiSetupComplete) return "verbindet";
+
+    const jetzt = Date.now();
+    if (jetzt - this.letzteSprache > PAUSIERT_NACH_MS) return "pausiert";
+
+    // Bezug ist das juengste von: letztes Audio zurueck, Verbindungsaufbau,
+    // Wiedereinsetzen der Sprache nach einer Pause. Sonst gaebe es nach jeder
+    // Pause einen Fehlalarm, bevor die erste Uebersetzung zurueckkommt.
+    const bezug = Math.max(this.lastAudioFrameTime, this.verbundenSeit, this.spracheSeit);
+    return jetzt - bezug > STOCKEND_NACH_MS ? "stockend" : "gesund";
+  }
+
+  /** Pegel des Eingangsframes messen, um Sprache von Stille zu trennen. */
+  private eingangMessen(samples: Int16Array): void {
+    // Jeder vierte Wert genuegt fuer eine Pegelschaetzung und spart Rechenzeit.
+    let summe = 0;
+    let n = 0;
+    for (let i = 0; i < samples.length; i += 4) {
+      summe += samples[i] * samples[i];
+      n++;
+    }
+    if (n === 0 || Math.sqrt(summe / n) < SPRACHSCHWELLE) return;
+
+    const jetzt = Date.now();
+    if (jetzt - this.letzteSprache > PAUSIERT_NACH_MS) this.spracheSeit = jetzt;
+    this.letzteSprache = jetzt;
+  }
+
+  /**
+   * Testschalter: GEMINI_TESTSTOERUNG_NACH_S=<Sekunden> simuliert nach dieser
+   * Zeit einen Abbruch mit Code 1011 und dem Guthaben-Grund aus dem Vorfall vom
+   * 2026-10-04. Ohne ihn waere der Stoerungspfad nur mit echtem leerem Guthaben
+   * testbar. Ist die Variable nicht gesetzt, ist dieser Code wirkungslos.
+   */
+  private teststoerungPlanen(): void {
+    const sekunden = Number(process.env.GEMINI_TESTSTOERUNG_NACH_S);
+    if (!sekunden || sekunden <= 0 || this.teststoerungGeplant) return;
+    this.teststoerungGeplant = true;
+
+    const code = Number(process.env.GEMINI_TESTSTOERUNG_CODE) || 1011;
+    const grund =
+      process.env.GEMINI_TESTSTOERUNG_GRUND ??
+      "Your prepayment credits are depleted (TESTSCHALTER)";
+    console.warn(
+      `[TranslationBridge:${this.targetLanguage}] TESTSCHALTER aktiv: Abbruch ${code} in ${sekunden} s`
+    );
+
+    setTimeout(() => {
+      if (this.status !== "active") return;
+      console.warn(
+        `[TranslationBridge:${this.targetLanguage}] TESTSCHALTER loest aus: ${code} "${grund}"`
+      );
+      const ws = this.geminiWs;
+      if (ws) {
+        ws.removeAllListeners();
+        ws.terminate();
+      }
+      this.geminiWs = null;
+      this.geminiSetupComplete = false;
+      this.beiVerbindungsabbruch(code, grund);
+    }, sekunden * 1000);
   }
 
   private sendGeminiSetup(ws: WebSocket = this.geminiWs!): void {
@@ -727,6 +1026,10 @@ export class TranslationBridge {
   }
 
   private sendAudioToGemini(frame: AudioFrame): void {
+    // Vor der Verbindungspruefung: Auch waehrend eines Ausfalls muss bekannt
+    // sein, ob gerade gesprochen wird.
+    this.eingangMessen(frame.data);
+
     if (
       !this.geminiWs ||
       this.geminiWs.readyState !== WebSocket.OPEN ||
