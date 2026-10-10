@@ -31,7 +31,8 @@ Broadcast-Passwort.
 | **Weiter** | `http://<server>:8080/api/control?session=cgh&action=resume&password=<passwort>` |
 | **Stopp** | `http://<server>:8080/api/control?session=cgh&action=stop&password=<passwort>` |
 
-`session` ist die Session-ID, die beim Anlegen vergeben wurde — standardmäßig `cgh`.
+`session` ist die Session-ID, die beim Anlegen vergeben wurde — also der Wert
+aus `DEFAULT_EVENT_ID`, sofern das Feld beim Anlegen nicht geändert wurde.
 
 ### Was die Tasten bewirken
 

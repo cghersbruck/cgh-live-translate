@@ -82,10 +82,5 @@ export function getNativeLanguageName(
   return NATIVE_LANGUAGE_NAMES[code] ?? fallbackName;
 }
 
-/**
- * Feste Session-ID fuer den Regelbetrieb (T-06).
- *
- * Ergibt eine gleichbleibende URL, die auf Handzettel, Beamer-Folie und
- * Aushang gedruckt werden kann - ohne jeden Sonntag einen neuen QR-Code.
- */
-export const GEMEINDE_SESSION_ID = "cgh";
+// Die feste Session-ID steht bewusst NICHT hier, sondern kommt je Deployment
+// aus der Umgebungsvariable DEFAULT_EVENT_ID (siehe src/app/api/config).

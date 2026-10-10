@@ -39,6 +39,11 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       BROADCAST_PASSWORD: ${BROADCAST_PASSWORD}
 
+      # Vorbelegung der Event-ID auf der Startseite, z. B. "cgh". Ergibt die
+      # dauerhafte Hoerer-Adresse /session/<id>/watch fuer Links und QR-Codes.
+      # Leer = zufaellige ID bei jedem Anlegen.
+      DEFAULT_EVENT_ID: ${DEFAULT_EVENT_ID:-}
+
       # Eingangsrate an Gemini: 48000 (Standard) oder 16000. Am 2026-10-04
       # wurde die Eingabe mit Faktor 3 abgerechnet - vermutlich wegen 48 kHz.
       # Erst nach A/B-Test auf 16000 umstellen. Am Mischpult aendert sich nichts.

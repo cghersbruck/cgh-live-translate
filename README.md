@@ -74,6 +74,7 @@ LiveKit.
 | `LIVEKIT_URL_INTERNAL` | Adresse aus Sicht des Servers, bei lokalem LiveKit `ws://cgh-livekit:7880`. Bei LiveKit Cloud leer lassen. |
 | `GEMINI_API_KEY` | Schlüssel aus einem Projekt mit aktivierter Abrechnung |
 | `BROADCAST_PASSWORD` | Schützt die Sender-Seite |
+| `DEFAULT_EVENT_ID` | Vorbelegung der Event-ID, z. B. `cgh`. Ergibt die dauerhafte Hörer-Adresse `/session/<id>/watch` für Links und QR-Codes. |
 
 > Der Gemini-Schlüssel sollte aus einem Paid-Tier-Projekt stammen. Der Free
 > Tier begrenzt gleichzeitige Verbindungen auf etwa drei bis fünf, was bei

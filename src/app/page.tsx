@@ -19,16 +19,16 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SUPPORTED_LANGUAGES } from "@/lib/languages";
-import { GEMEINDE_LANGUAGES, GEMEINDE_SESSION_ID } from "@/config/gemeinde";
+import { GEMEINDE_LANGUAGES } from "@/config/gemeinde";
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [passwordRequired, setPasswordRequired] = useState(false);
   const [password, setPassword] = useState("");
-  // Vorbelegt mit der festen Session-ID: Links und QR-Codes zeigen dauerhaft
-  // auf /session/cgh/watch. Bleibt aenderbar, etwa fuer einen Testlauf.
-  const [eventId, setEventId] = useState(GEMEINDE_SESSION_ID);
+  // Wird beim Laden aus DEFAULT_EVENT_ID vorbelegt (siehe /api/config), damit
+  // Links und QR-Codes je Deployment dauerhaft gleich bleiben.
+  const [eventId, setEventId] = useState("");
   const [error, setError] = useState<string | null>(null);
   
   const [restrictLanguages, setRestrictLanguages] = useState(true);
@@ -56,6 +56,19 @@ export default function Home() {
       }
     }
     checkAuthStatus();
+
+    // Vorbelegung der Event-ID aus der Container-Umgebung. Nur setzen, wenn
+    // das Feld noch leer ist - wer schneller tippt, wird nicht ueberschrieben.
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((c: { standardEventId?: string }) => {
+        if (c.standardEventId) {
+          setEventId((bisher) => (bisher === "" ? c.standardEventId! : bisher));
+        }
+      })
+      .catch(() => {
+        // Ohne Vorbelegung funktioniert die Seite wie im Upstream.
+      });
   }, []);
 
   async function createSession() {
