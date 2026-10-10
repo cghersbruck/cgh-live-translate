@@ -19,14 +19,16 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SUPPORTED_LANGUAGES } from "@/lib/languages";
-import { GEMEINDE_LANGUAGES } from "@/config/gemeinde";
+import { GEMEINDE_LANGUAGES, GEMEINDE_SESSION_ID } from "@/config/gemeinde";
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [passwordRequired, setPasswordRequired] = useState(false);
   const [password, setPassword] = useState("");
-  const [eventId, setEventId] = useState("");
+  // Vorbelegt mit der festen Session-ID: Links und QR-Codes zeigen dauerhaft
+  // auf /session/cgh/watch. Bleibt aenderbar, etwa fuer einen Testlauf.
+  const [eventId, setEventId] = useState(GEMEINDE_SESSION_ID);
   const [error, setError] = useState<string | null>(null);
   
   const [restrictLanguages, setRestrictLanguages] = useState(true);

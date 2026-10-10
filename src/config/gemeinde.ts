@@ -88,4 +88,4 @@ export function getNativeLanguageName(
  * Ergibt eine gleichbleibende URL, die auf Handzettel, Beamer-Folie und
  * Aushang gedruckt werden kann - ohne jeden Sonntag einen neuen QR-Code.
  */
-export const GEMEINDE_SESSION_ID = "gottesdienst";
+export const GEMEINDE_SESSION_ID = "cgh";

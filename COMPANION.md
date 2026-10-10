@@ -26,12 +26,12 @@ Broadcast-Passwort.
 
 | Taste | URL |
 | :--- | :--- |
-| **Start** | `http://<server>:8080/api/control?session=gottesdienst&action=start&password=<passwort>` |
-| **Pause** | `http://<server>:8080/api/control?session=gottesdienst&action=pause&password=<passwort>` |
-| **Weiter** | `http://<server>:8080/api/control?session=gottesdienst&action=resume&password=<passwort>` |
-| **Stopp** | `http://<server>:8080/api/control?session=gottesdienst&action=stop&password=<passwort>` |
+| **Start** | `http://<server>:8080/api/control?session=cgh&action=start&password=<passwort>` |
+| **Pause** | `http://<server>:8080/api/control?session=cgh&action=pause&password=<passwort>` |
+| **Weiter** | `http://<server>:8080/api/control?session=cgh&action=resume&password=<passwort>` |
+| **Stopp** | `http://<server>:8080/api/control?session=cgh&action=stop&password=<passwort>` |
 
-`session` ist die Session-ID, die beim Anlegen vergeben wurde.
+`session` ist die Session-ID, die beim Anlegen vergeben wurde — standardmäßig `cgh`.
 
 ### Was die Tasten bewirken
 
@@ -56,7 +56,7 @@ Dieselbe Adresse mit `action=status` verändert nichts, sondern liefert nur den
 Zustand:
 
 ```
-http://<server>:8080/api/control?session=gottesdienst&action=status&password=<passwort>
+http://<server>:8080/api/control?session=cgh&action=status&password=<passwort>
 ```
 
 Antwort:

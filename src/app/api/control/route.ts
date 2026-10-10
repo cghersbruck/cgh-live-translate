@@ -5,7 +5,7 @@
  * URL auskommt, sind GET und POST gleichwertig - GET ist in Companion mit
  * Abstand am einfachsten einzurichten.
  *
- *   GET /api/control?session=gottesdienst&action=start&password=...
+ *   GET /api/control?session=cgh&action=start&password=...
  *
  * Aktionen: start | pause | resume | stop | status
  * "status" setzt keinen Befehl, sondern liefert nur den Zustand zurueck -
