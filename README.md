@@ -94,8 +94,11 @@ dient [.env.example](.env.example).
    Sprache lässt sich dazunehmen oder abwählen. Genau diese Auswahl bekommen
    die Besucher später angeboten.
 3. Session anlegen → Broadcast-Seite öffnet sich.
-4. Mikrofon einschalten. Das Eingangsgerät wählt Chrome über seine
-   Seiteneinstellungen; der Sende-PC sollte das Pultsignal als Eingang haben.
+4. Das Mikrofon startet automatisch mit dem Gerät und der Lautstärke vom
+   letzten Mal. Beim allerersten Mal an einem PC: Gerät (Pultsignal) im
+   Mikrofon-Kasten wählen und „Enable" drücken — ab dann merkt sich die Seite
+   die Wahl. Ist das gespeicherte Gerät nicht angeschlossen, sendet die Seite
+   nicht und zeigt einen Hinweis.
 5. Hörer-Link bzw. QR-Code weitergeben.
 
 Die Browser-Konsole zeigt nach dem Einschalten unter `Aufnahme-Einstellungen`,

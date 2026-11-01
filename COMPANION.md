@@ -36,7 +36,9 @@ aus `DEFAULT_EVENT_ID`, sofern das Feld beim Anlegen nicht geändert wurde.
 
 ### Was die Tasten bewirken
 
-**Start** schaltet den Mikrofoneingang mit Standardeinstellungen ein. Läuft die
+**Start** schaltet den Mikrofoneingang mit dem auf der Seite gewählten Gerät
+ein. Meist ist das gar nicht nötig: Die Sendeseite startet beim Öffnen von
+selbst mit dem zuletzt verwendeten Mikrofon. Läuft die
 Übertragung schon, hebt Start lediglich eine bestehende Pause auf.
 
 **Pause** hält den Ton an. Nach 5 Sekunden trennt die App zusätzlich die

@@ -27,6 +27,11 @@ import { Track, RoomEvent } from "livekit-client";
 import SessionQRCode from "@/components/SessionQRCode";
 import CompanionControl from "@/components/CompanionControl";
 import { getLanguageByCode } from "@/lib/languages";
+import {
+  einstellungenLaden,
+  einstellungenSpeichern,
+  geraetFinden,
+} from "@/lib/sender-einstellungen";
 
 interface TranslationInfo {
   language: string;
@@ -110,6 +115,17 @@ function BroadcastControls({
   // Ton angehalten per Companion. Die Session bleibt dabei bestehen, es wird
   // nur kein Audio mehr uebertragen - gedacht fuer Lobpreis und Moderation.
   const [isPaused, setIsPaused] = useState(false);
+
+  // Mikrofonauswahl und Autostart (siehe ANPASSUNGEN.md). Gespeichert wird je
+  // Sende-PC in localStorage, nicht je Session.
+  const [mikrofone, setMikrofone] = useState<MediaDeviceInfo[]>([]);
+  const [gewaehltesMikrofon, setGewaehltesMikrofon] = useState("");
+  const [mixerBereit, setMixerBereit] = useState(false);
+  // Chrome laesst einen AudioContext ohne Benutzeraktion nicht anlaufen. Beim
+  // Autostart nach einem Neuladen kann das passieren - dann fliesst nur Stille.
+  const [audioGesperrt, setAudioGesperrt] = useState(false);
+  const [autostartHinweis, setAutostartHinweis] = useState<string | null>(null);
+  const autostartErledigt = useRef(false);
 
   // Manage Screen Wake Lock to prevent the phone/device from sleeping during broadcast
   useEffect(() => {
@@ -218,6 +234,8 @@ function BroadcastControls({
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         const ctx = new AudioContextClass();
         audioContextRef.current = ctx;
+        setAudioGesperrt(ctx.state === "suspended");
+        ctx.onstatechange = () => setAudioGesperrt(ctx.state === "suspended");
 
         const dest = ctx.createMediaStreamDestination();
         destinationNodeRef.current = dest;
@@ -233,6 +251,7 @@ function BroadcastControls({
           localPub = pub;
           await pub.mute();
           console.log("Published and initially muted mixed audio track:", pub.trackSid);
+          setMixerBereit(true);
         }
       } catch (err) {
         console.error("Failed to initialize client audio mixer:", err);
@@ -280,6 +299,7 @@ function BroadcastControls({
       }
       destinationNodeRef.current = null;
       publishedTrackPubRef.current = null;
+      setMixerBereit(false);
     };
   }, [room, room?.localParticipant]);
 
@@ -304,81 +324,204 @@ function BroadcastControls({
     }
   }, [isMicEnabled, isTabAudioEnabled, isPaused]);
 
-  const toggleMicrophone = async () => {
-    const ctx = audioContextRef.current;
-    const dest = destinationNodeRef.current;
-    if (!ctx || !dest) return;
+  /** Liest die angeschlossenen Mikrofone. Namen liefert Chrome erst nach erteilter Freigabe. */
+  const mikrofoneAuflisten = useCallback(async () => {
+    try {
+      const alle = await navigator.mediaDevices.enumerateDevices();
+      const liste = alle.filter((g) => g.kind === "audioinput" && g.deviceId);
+      setMikrofone(liste);
+      return liste;
+    } catch {
+      return [];
+    }
+  }, []);
 
-    if (isMicEnabled) {
-      if (micSourceNodeRef.current) {
-        micSourceNodeRef.current.disconnect();
-        micSourceNodeRef.current = null;
-      }
-      if (micGainNodeRef.current) {
-        micGainNodeRef.current.disconnect();
-        micGainNodeRef.current = null;
-      }
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((track) => track.stop());
-        micStreamRef.current = null;
-      }
-      setIsMicEnabled(false);
-    } else {
-      try {
-        await ctx.resume();
-        // Browser-Signalverarbeitung abschalten.
-        //
-        // Bei `audio: true` aktiviert Chrome automatisch Echo-Unterdrueckung,
-        // Rauschfilter und automatische Aussteuerung. Die sind fuer
-        // Videotelefonie gedacht und arbeiten gegen ein fertig gemischtes
-        // Pultsignal: Die Automatik regelt in Sprechpausen hoch und beim
-        // Einsetzen der Stimme wieder herunter, der Rauschfilter schneidet
-        // leise Passagen weg. Abschalten geht nur hier - in den
-        // Chrome-Einstellungen gibt es dafuer keine Option.
-        //
-        // Das Eingangsgeraet waehlt Chrome selbst ueber seine
-        // Seiteneinstellungen; dafuer ist hier bewusst nichts vorgegeben.
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            channelCount: 1,
-          },
-        });
+  // Ein- und Ausstecken waehrend der Sendung. Die erste Liste holt der
+  // Autostart-Effekt weiter unten.
+  useEffect(() => {
+    navigator.mediaDevices?.addEventListener("devicechange", mikrofoneAuflisten);
+    return () => {
+      navigator.mediaDevices?.removeEventListener("devicechange", mikrofoneAuflisten);
+    };
+  }, [mikrofoneAuflisten]);
 
-        // Chrome uebernimmt diese Vorgaben bei manchen Treibern stillschweigend
-        // nicht. Deshalb gegenpruefen statt annehmen - im Zweifel steht es im
-        // Log und laesst sich nachvollziehen.
-        const einstellungen = stream.getAudioTracks()[0]?.getSettings();
-        console.log("[BroadcastControls] Aufnahme-Einstellungen:", {
-          geraet: stream.getAudioTracks()[0]?.label,
-          echoCancellation: einstellungen?.echoCancellation,
-          noiseSuppression: einstellungen?.noiseSuppression,
-          autoGainControl: einstellungen?.autoGainControl,
-          channelCount: einstellungen?.channelCount,
-          sampleRate: einstellungen?.sampleRate,
-        });
-
-        micStreamRef.current = stream;
-
-        const source = ctx.createMediaStreamSource(stream);
-        micSourceNodeRef.current = source;
-
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(micVolume / 100, ctx.currentTime);
-        micGainNodeRef.current = gainNode;
-
-        source.connect(gainNode);
-        gainNode.connect(dest);
-
-        setIsMicEnabled(true);
-      } catch (err) {
-        console.error("Failed to access microphone:", err);
-        alert("Could not access microphone: " + (err as Error).message);
-      }
+  /** Trennt den Mikrofoneingang vom Mixer, ohne den Zustand anzufassen. */
+  const mikrofonTrennen = () => {
+    if (micSourceNodeRef.current) {
+      micSourceNodeRef.current.disconnect();
+      micSourceNodeRef.current = null;
+    }
+    if (micGainNodeRef.current) {
+      micGainNodeRef.current.disconnect();
+      micGainNodeRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
     }
   };
+
+  /**
+   * Schaltet das Mikrofon ein bzw. auf ein anderes Geraet um. Liefert bei
+   * Erfolg null, sonst die Fehlermeldung - der Aufrufer entscheidet, ob sie
+   * als alert() oder still als Hinweis erscheint.
+   */
+  const startMicrophone = async (
+    deviceId: string,
+    lautstaerke: number = micVolume
+  ): Promise<string | null> => {
+    const ctx = audioContextRef.current;
+    const dest = destinationNodeRef.current;
+    if (!ctx || !dest) return "Audio-Mixer noch nicht bereit";
+
+    // Bewusst ohne await: Ohne Benutzeraktion (Autostart nach Neuladen) bleibt
+    // das Promise in Chrome haengen, bis jemand klickt. Der Graph wird trotzdem
+    // aufgebaut; der Hinweis "Ton freigeben" erscheint ueber onstatechange.
+    ctx.resume().catch(() => {});
+
+    try {
+      // Browser-Signalverarbeitung abschalten.
+      //
+      // Bei `audio: true` aktiviert Chrome automatisch Echo-Unterdrueckung,
+      // Rauschfilter und automatische Aussteuerung. Die sind fuer
+      // Videotelefonie gedacht und arbeiten gegen ein fertig gemischtes
+      // Pultsignal: Die Automatik regelt in Sprechpausen hoch und beim
+      // Einsetzen der Stimme wieder herunter, der Rauschfilter schneidet
+      // leise Passagen weg. Abschalten geht nur hier - in den
+      // Chrome-Einstellungen gibt es dafuer keine Option.
+      //
+      // Das Geraet kommt aus der Auswahl auf der Seite. "exact", damit
+      // Chrome bei fehlendem Geraet nicht stillschweigend ein anderes nimmt
+      // - etwa das eingebaute Laptop-Mikrofon.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      });
+
+      // Chrome uebernimmt diese Vorgaben bei manchen Treibern stillschweigend
+      // nicht. Deshalb gegenpruefen statt annehmen - im Zweifel steht es im
+      // Log und laesst sich nachvollziehen.
+      const einstellungen = stream.getAudioTracks()[0]?.getSettings();
+      console.log("[BroadcastControls] Aufnahme-Einstellungen:", {
+        geraet: stream.getAudioTracks()[0]?.label,
+        echoCancellation: einstellungen?.echoCancellation,
+        noiseSuppression: einstellungen?.noiseSuppression,
+        autoGainControl: einstellungen?.autoGainControl,
+        channelCount: einstellungen?.channelCount,
+        sampleRate: einstellungen?.sampleRate,
+      });
+
+      // Erst jetzt den alten Eingang abloesen: Beim Geraetewechsel bleibt
+      // so das bisherige Mikrofon aktiv, falls das neue nicht startet.
+      mikrofonTrennen();
+      micStreamRef.current = stream;
+
+      const source = ctx.createMediaStreamSource(stream);
+      micSourceNodeRef.current = source;
+
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(lautstaerke / 100, ctx.currentTime);
+      micGainNodeRef.current = gainNode;
+
+      source.connect(gainNode);
+      gainNode.connect(dest);
+
+      setIsMicEnabled(true);
+
+      const track = stream.getAudioTracks()[0];
+      const tatsaechlich = einstellungen?.deviceId || deviceId;
+      setGewaehltesMikrofon(tatsaechlich);
+      einstellungenSpeichern({ deviceId: tatsaechlich, label: track?.label ?? "", lautstaerke });
+      setAutostartHinweis(null);
+      // Nach der ersten Freigabe liefert Chrome die Geraetenamen.
+      mikrofoneAuflisten();
+      return null;
+    } catch (err) {
+      console.error("Failed to access microphone:", err);
+      const e = err as Error;
+      return e.name === "OverconstrainedError" || e.name === "NotFoundError"
+        ? "Mikrofon nicht gefunden – ist es angeschlossen?"
+        : e.message;
+    }
+  };
+
+  const stopMicrophone = () => {
+    mikrofonTrennen();
+    setIsMicEnabled(false);
+  };
+
+  const toggleMicrophone = async () => {
+    if (isMicEnabled) {
+      stopMicrophone();
+      return;
+    }
+    const fehler = await startMicrophone(gewaehltesMikrofon);
+    if (fehler) alert("Could not access microphone: " + fehler);
+  };
+
+  const mikrofonWechseln = async (deviceId: string) => {
+    const vorher = gewaehltesMikrofon;
+    setGewaehltesMikrofon(deviceId);
+    if (!isMicEnabled) return;
+    const fehler = await startMicrophone(deviceId);
+    if (fehler) {
+      setGewaehltesMikrofon(vorher);
+      alert("Could not switch microphone: " + fehler);
+    }
+  };
+
+  // Autostart: Beim Oeffnen der Sendeseite mit dem zuletzt verwendeten
+  // Mikrofon und derselben Lautstaerke senden. Gilt auch nach einem Neuladen
+  // oder Browser-Neustart. Ohne gespeicherte Einstellung (erster Start an
+  // diesem PC) bleibt es beim manuellen Einschalten.
+  useEffect(() => {
+    if (!mixerBereit || autostartErledigt.current) return;
+    autostartErledigt.current = true;
+    const gespeichert = einstellungenLaden();
+
+    (async () => {
+      const liste = await mikrofoneAuflisten();
+      if (!gespeichert) return;
+      setMicVolume(gespeichert.lautstaerke);
+      // Ohne erteilte Freigabe liefert Chrome keine Namen. Dann direkt
+      // versuchen - getUserMedia fragt nach, "exact" verhindert ein falsches Geraet.
+      const namenBekannt = liste.some((g) => g.label);
+      const geraet = geraetFinden(liste, gespeichert);
+      if (namenBekannt && !geraet && (gespeichert.deviceId || gespeichert.label)) {
+        setAutostartHinweis(
+          `Zuletzt verwendetes Mikrofon „${gespeichert.label || gespeichert.deviceId}" ist nicht angeschlossen. Bitte Gerät wählen und einschalten.`
+        );
+        return;
+      }
+      const id = geraet?.deviceId ?? gespeichert.deviceId;
+      setGewaehltesMikrofon(id);
+      console.log("[Autostart] Starte mit gespeichertem Mikrofon:", geraet?.label || id || "Standard");
+      const fehler = await startMicrophone(id, gespeichert.lautstaerke);
+      if (fehler) setAutostartHinweis(`Automatischer Start fehlgeschlagen: ${fehler}`);
+    })();
+    // Laeuft genau einmal, sobald der Mixer steht. startMicrophone ist bewusst
+    // keine Abhaengigkeit - es aendert sich bei jedem Rendern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mixerBereit, mikrofoneAuflisten]);
+
+  // Gesperrten AudioContext mit der ersten Beruehrung der Seite freigeben.
+  useEffect(() => {
+    if (!audioGesperrt) return;
+    const freigeben = () => {
+      audioContextRef.current?.resume().catch(() => {});
+    };
+    document.addEventListener("pointerdown", freigeben);
+    document.addEventListener("keydown", freigeben);
+    return () => {
+      document.removeEventListener("pointerdown", freigeben);
+      document.removeEventListener("keydown", freigeben);
+    };
+  }, [audioGesperrt]);
 
   const toggleTabAudio = async () => {
     const ctx = audioContextRef.current;
@@ -461,6 +604,8 @@ function BroadcastControls({
     if (micGainNodeRef.current && audioContextRef.current) {
       micGainNodeRef.current.gain.setValueAtTime(vol / 100, audioContextRef.current.currentTime);
     }
+    const gespeichert = einstellungenLaden();
+    if (gespeichert) einstellungenSpeichern({ ...gespeichert, lautstaerke: vol });
   };
 
   const handleTabVolumeChange = (vol: number) => {
@@ -660,6 +805,45 @@ function BroadcastControls({
                 {isMicEnabled ? "Disable" : "Enable"}
               </button>
             </div>
+            {/* Geraeteauswahl. Die Wahl wird beim Einschalten gespeichert und
+                beim naechsten Oeffnen der Seite automatisch gestartet. */}
+            <select
+              className="input-field"
+              value={gewaehltesMikrofon}
+              onChange={(e) => mikrofonWechseln(e.target.value)}
+              style={{ fontSize: "13px", padding: "8px 10px" }}
+            >
+              {!mikrofone.some((g) => g.deviceId === gewaehltesMikrofon) && (
+                <option value={gewaehltesMikrofon}>
+                  {gewaehltesMikrofon ? "Gespeichertes Mikrofon" : "Standardgerät des Browsers"}
+                </option>
+              )}
+              {mikrofone.map((g, i) => (
+                <option key={g.deviceId} value={g.deviceId}>
+                  {g.label || `Mikrofon ${i + 1} (Name nach Freigabe sichtbar)`}
+                </option>
+              ))}
+            </select>
+            {autostartHinweis && (
+              <p className="body-sm" role="alert" style={{ color: "var(--warning)", margin: 0 }}>
+                {autostartHinweis}
+              </p>
+            )}
+            {isMicEnabled && audioGesperrt && (
+              <button
+                className="btn"
+                onClick={() => audioContextRef.current?.resume().catch(() => {})}
+                style={{
+                  padding: "12px 16px",
+                  border: "2px solid var(--error)",
+                  background: "var(--error-soft)",
+                  color: "var(--error)",
+                  fontWeight: 600,
+                }}
+              >
+                Ton ist blockiert – hier klicken, um die Übertragung freizugeben
+              </button>
+            )}
             {isMicEnabled && (
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span className="mono" style={{ width: "32px", fontSize: "11px" }}>Vol</span>

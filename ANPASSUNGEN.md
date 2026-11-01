@@ -68,6 +68,8 @@ Vergleichsbasis für alle späteren Änderungen liefert.
 | `src/lib/kosten.ts` | **neu** | Preise des Translate-Modells (Stand 2026-10-04) und Kostenschätzung. Bei Preisänderungen durch Google nur hier anpassen. |
 | `scripts/log-auswertung.sh` | **neu** | Fasst ein Container-Log nach dem Gottesdienst zusammen: je Bridge Laufzeit, Audio, geschätzte Kosten, Wiederverbindungen, Fehler. Läuft direkt auf dem Server. |
 | `src/lib/translation-bridge.ts` | **geändert (Kosten)** | Exakte Zähler für gesendetes und empfangenes Audio; Pause trennt die Gemini-Verbindung (siehe Abschnitt „Kosten"); Eingangsrate per `GEMINI_INPUT_SAMPLE_RATE` umschaltbar. |
+| `src/lib/sender-einstellungen.ts` | **neu** | Speichert am Sende-PC das zuletzt verwendete Mikrofon (deviceId und Name) und die Lautstärke in `localStorage`. Grundlage für den Autostart. |
+| `src/app/session/[id]/broadcast/page.tsx` (erneut) | **geändert** | Mikrofonauswahl auf der Seite und Autostart: Beim Öffnen startet das Mikrofon mit Gerät und Lautstärke vom letzten Mal. Siehe Abschnitt „Autostart der Sendeseite". |
 | `.gitignore` | **ergänzt** | `/logs` — Testlauf-Logs gehören nicht ins Repository. Dazu `!.env.example`: Das vorhandene Muster `.env*` hätte sonst auch die Vorlage ausgeschlossen, die eingecheckt werden muss. |
 
 ### Bewusst unverändert gelassen
@@ -90,6 +92,42 @@ für dieselbe Sache gewesen.
 Geblieben ist der Teil, den Chrome **nicht** anbietet: das Abschalten der
 Signalaufbereitung. Dafür gibt es in Chrome keine Einstellung, es geht nur beim
 Anfordern des Audios.
+
+**Nachtrag 2026-11-01:** Das Dropdown ist mit dem Autostart doch gekommen —
+siehe nächster Abschnitt.
+
+---
+
+## Autostart der Sendeseite
+
+Wunsch: Session anlegen, und die Übertragung läuft — ohne „Enable" und ohne
+Gerätesuche in Chrome.
+
+- Beim Einschalten des Mikrofons merkt sich die Seite Gerät (deviceId **und**
+  Name) und Lautstärke in `localStorage`. Lautstärkeänderungen werden laufend
+  nachgezogen. Die Einstellung gehört zum Sende-PC, nicht zur Session.
+- Öffnet sich die Sendeseite und es gibt eine gespeicherte Einstellung, startet
+  das Mikrofon selbst. Das gilt auch nach Neuladen oder Browser-Neustart.
+  Beim allerersten Mal an einem PC bleibt es beim manuellen Einschalten.
+- Das Gerät wird mit `exact` angefordert. Fehlt es, nimmt Chrome **nicht**
+  stillschweigend ein anderes (etwa das Laptop-Mikrofon), sondern die Seite
+  zeigt einen Hinweis und sendet nicht.
+- Wiedererkennung zuerst über die deviceId, dann über den Namen — Chrome
+  vergibt die ID nach gelöschten Websitedaten neu.
+- Deshalb jetzt doch ein Dropdown: Ohne sichtbare Auswahl wäre nicht
+  nachvollziehbar, welches Gerät der Autostart nimmt. Ein Wechsel im laufenden
+  Betrieb löst den alten Eingang erst ab, wenn der neue steht.
+
+**Einschränkung:** Chrome lässt einen AudioContext ohne Benutzeraktion nicht
+anlaufen. Beim Weg über „Session anlegen" ist die Seite schon angeklickt, das
+passt. Wird die Sendeseite dagegen direkt geöffnet oder neu geladen, kann der
+Ton blockiert sein — dann erscheint ein roter Knopf, und jeder Klick oder
+Tastendruck auf der Seite gibt ihn frei. Auf einem reinen Sende-PC lässt sich
+das mit dem Chrome-Startparameter `--autoplay-policy=no-user-gesture-required`
+ganz vermeiden.
+
+Bildschirmfreigabe („Share Tab") startet nicht automatisch: `getDisplayMedia`
+verlangt immer eine Benutzeraktion.
 
 ---
 
