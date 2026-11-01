@@ -68,7 +68,8 @@ Vergleichsbasis für alle späteren Änderungen liefert.
 | `src/lib/kosten.ts` | **neu** | Preise des Translate-Modells (Stand 2026-10-04) und Kostenschätzung. Bei Preisänderungen durch Google nur hier anpassen. |
 | `scripts/log-auswertung.sh` | **neu** | Fasst ein Container-Log nach dem Gottesdienst zusammen: je Bridge Laufzeit, Audio, geschätzte Kosten, Wiederverbindungen, Fehler. Läuft direkt auf dem Server. |
 | `src/lib/translation-bridge.ts` | **geändert (Kosten)** | Exakte Zähler für gesendetes und empfangenes Audio; Pause trennt die Gemini-Verbindung (siehe Abschnitt „Kosten"); Eingangsrate per `GEMINI_INPUT_SAMPLE_RATE` umschaltbar. |
-| `src/lib/sender-einstellungen.ts` | **neu** | Speichert am Sende-PC das zuletzt verwendete Mikrofon (deviceId und Name) und die Lautstärke in `localStorage`. Grundlage für den Autostart. |
+| `src/lib/sender-einstellungen.ts` | **neu** | Speichert am Sende-PC das zuletzt verwendete Mikrofon (deviceId und Name) und die Lautstärke in `localStorage`, dazu die Einrichtung für den Session-Autostart. |
+| `src/app/page.tsx` (erneut) | **geändert** | Haken „Auf diesem PC merken" und Session-Autostart. Siehe Abschnitt „Session-Autostart". |
 | `src/app/session/[id]/broadcast/page.tsx` (erneut) | **geändert** | Mikrofonauswahl auf der Seite und Autostart: Beim Öffnen startet das Mikrofon mit Gerät und Lautstärke vom letzten Mal. Siehe Abschnitt „Autostart der Sendeseite". |
 | `.gitignore` | **ergänzt** | `/logs` — Testlauf-Logs gehören nicht ins Repository. Dazu `!.env.example`: Das vorhandene Muster `.env*` hätte sonst auch die Vorlage ausgeschlossen, die eingecheckt werden muss. |
 
@@ -120,14 +121,37 @@ Gerätesuche in Chrome.
 
 **Einschränkung:** Chrome lässt einen AudioContext ohne Benutzeraktion nicht
 anlaufen. Beim Weg über „Session anlegen" ist die Seite schon angeklickt, das
-passt. Wird die Sendeseite dagegen direkt geöffnet oder neu geladen, kann der
-Ton blockiert sein — dann erscheint ein roter Knopf, und jeder Klick oder
-Tastendruck auf der Seite gibt ihn frei. Auf einem reinen Sende-PC lässt sich
-das mit dem Chrome-Startparameter `--autoplay-policy=no-user-gesture-required`
-ganz vermeiden.
+passt. Wird die Sendeseite dagegen ohne Klick erreicht — neu geladen oder über
+den Session-Autostart unten —, kann der Ton blockiert sein. Dann erscheint ein
+roter Knopf, und jeder Klick oder Tastendruck auf der Seite gibt ihn frei. Auf
+dem Sende-PC lässt sich das mit dem Chrome-Startparameter
+`--autoplay-policy=no-user-gesture-required` ganz vermeiden (siehe README).
 
 Bildschirmfreigabe („Share Tab") startet nicht automatisch: `getDisplayMedia`
 verlangt immer eine Benutzeraktion.
+
+### Session-Autostart
+
+Zweiter Schritt: Auch das Anlegen der Session entfällt. Unter „Create session"
+gibt es den Haken „Auf diesem PC merken". Gesetzt, speichert die Startseite
+Passwort, Event-ID, Sprachen, Anweisungen und die vergebene Session-ID in
+`localStorage`. Beim nächsten Öffnen der Startseite geht es ohne Klick direkt
+in die Sendeseite.
+
+- **Opt-in**, weil das Passwort dafür im Klartext im Browser liegt. Nur auf dem
+  Sende-PC setzen.
+- **Laufende Session wird wiederverwendet**, nicht neu angelegt. Neu anlegen
+  unter derselben ID reißt im Upstream alle laufenden Übersetzungen ab — nach
+  einem Browserabsturz mitten in der Predigt säßen die Hörer im Stillen.
+  Von Hand über „Create session" wird dagegen wie bisher neu angelegt, damit
+  geänderte Sprachen greifen.
+- **Ausstieg:** „End broadcast" führt auf `/?beendet`, dort startet nichts
+  automatisch — sonst käme man nie mehr aus der Sendeseite heraus. Ebenso
+  `/?einrichten` zum Ändern der Einrichtung; dorthin führen auch „Cancel" und
+  „Go home" der Sendeseite, damit ein dauerhafter Fehler keine Schleife wird.
+  Die Startseite zeigt dann „Einrichtung entfernen".
+- Wird das gespeicherte Passwort abgelehnt (geändert in der `.env`), bleibt
+  die Startseite mit Hinweis stehen.
 
 ---
 

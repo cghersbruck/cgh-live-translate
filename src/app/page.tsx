@@ -20,6 +20,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SUPPORTED_LANGUAGES } from "@/lib/languages";
 import { GEMEINDE_LANGUAGES } from "@/config/gemeinde";
+import {
+  AutostartEinrichtung,
+  autostartLaden,
+  autostartLoeschen,
+  autostartSpeichern,
+} from "@/lib/sender-einstellungen";
 
 export default function Home() {
   const router = useRouter();
@@ -39,6 +45,11 @@ export default function Home() {
   ]);
   const [langSearch, setLangSearch] = useState("");
   const [systemInstruction, setSystemInstruction] = useState("");
+  // Autostart (siehe ANPASSUNGEN.md). "laeuft": Session wird gerade
+  // automatisch gestartet. "angehalten": eingerichtet, aber diesmal nicht
+  // ausgeloest - nach "End broadcast" oder mit ?einrichten.
+  const [autostart, setAutostart] = useState<"aus" | "laeuft" | "angehalten">("aus");
+  const [merken, setMerken] = useState(false);
 
   const filteredLanguages = SUPPORTED_LANGUAGES.filter(lang => 
     lang.name.toLowerCase().includes(langSearch.toLowerCase()) ||
@@ -69,36 +80,109 @@ export default function Home() {
       .catch(() => {
         // Ohne Vorbelegung funktioniert die Seite wie im Upstream.
       });
+
+    // Eingerichteter Sende-PC: Formular mit der gespeicherten Einrichtung
+    // fuellen und direkt in die Sendeseite starten. Nicht nach "End
+    // broadcast" (?beendet) - sonst kaeme man nie mehr heraus - und nicht mit
+    // ?einrichten, um die Einrichtung zu aendern.
+    const gespeichert = autostartLaden();
+    if (gespeichert) {
+      const params = new URLSearchParams(window.location.search);
+      const unterdrueckt = params.has("beendet") || params.has("einrichten");
+      Promise.resolve().then(() => {
+        setPassword(gespeichert.passwort);
+        setEventId(gespeichert.eventId);
+        setRestrictLanguages(gespeichert.sprachen !== null);
+        if (gespeichert.sprachen) setSelectedLanguages(gespeichert.sprachen);
+        setSystemInstruction(gespeichert.systemInstruction);
+        setMerken(true);
+        if (unterdrueckt) {
+          setAutostart("angehalten");
+        } else {
+          setAutostart("laeuft");
+          sessionStarten(gespeichert, { merken: true, wiederEinsteigen: true });
+        }
+      });
+    }
+    // sessionStarten liest nur seine Argumente; einmal beim Laden genuegt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function createSession() {
+  function formularWerte(): AutostartEinrichtung {
+    return {
+      passwort: password,
+      eventId,
+      sprachen: restrictLanguages ? selectedLanguages : null,
+      systemInstruction,
+      sessionId: "",
+    };
+  }
+
+  async function sessionStarten(
+    e: AutostartEinrichtung,
+    { merken, wiederEinsteigen }: { merken: boolean; wiederEinsteigen: boolean }
+  ) {
     setLoading(true);
     setError(null);
     try {
+      // Beim Autostart eine noch laufende Session wiederverwenden (Browser
+      // abgestuerzt, Seite neu geoeffnet). Neu anlegen wuerde alle laufenden
+      // Uebersetzungen abreissen - die Hoerer saessen ploetzlich im Stillen.
+      if (wiederEinsteigen && e.sessionId) {
+        const vorhanden = await fetch(`/api/sessions/${encodeURIComponent(e.sessionId)}`);
+        if (vorhanden.ok) {
+          if (e.passwort) sessionStorage.setItem("broadcast_password", e.passwort);
+          router.push(`/session/${e.sessionId}/broadcast`);
+          return;
+        }
+      }
+
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          organizerName: "host", 
-          password, 
-          eventId,
-          allowedLanguages: restrictLanguages ? selectedLanguages : undefined,
-          systemInstruction: systemInstruction.trim() || undefined,
+        body: JSON.stringify({
+          organizerName: "host",
+          password: e.passwort,
+          eventId: e.eventId,
+          allowedLanguages: e.sprachen ?? undefined,
+          systemInstruction: e.systemInstruction.trim() || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401 && wiederEinsteigen) {
+          throw new Error("Gespeichertes Passwort wurde abgelehnt. Bitte neu eingeben und starten.");
+        }
         throw new Error(data.error || "Failed to create session");
       }
-      if (passwordRequired) {
-        sessionStorage.setItem("broadcast_password", password);
+      if (merken) {
+        autostartSpeichern({ ...e, sessionId: data.sessionId });
+      } else {
+        autostartLoeschen();
+      }
+      // Upstream setzte das nur bei passwordRequired. Beim Autostart ist der
+      // Status womoeglich noch nicht geladen; ein leeres Passwort bleibt weg.
+      if (e.passwort) {
+        sessionStorage.setItem("broadcast_password", e.passwort);
       }
       router.push(`/session/${data.sessionId}/broadcast`);
     } catch (err) {
       console.error("Failed to create session:", err);
       setError((err as Error).message);
       setLoading(false);
+      setAutostart((a) => (a === "laeuft" ? "angehalten" : a));
     }
+  }
+
+  if (autostart === "laeuft") {
+    return (
+      <div className="page">
+        <div className="container" style={{ textAlign: "center" }}>
+          <div className="spinner" style={{ margin: "0 auto 16px" }} />
+          <p className="body-sm">Übertragung wird automatisch gestartet …</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -289,11 +373,63 @@ export default function Home() {
           </p>
         )}
 
+        {/* Eingerichteter Sende-PC, Autostart diesmal nicht ausgeloest */}
+        {autostart === "angehalten" && (
+          <div
+            className="enter-d2"
+            style={{
+              maxWidth: 340,
+              margin: "0 auto 20px",
+              padding: "12px 16px",
+              border: "1px solid var(--border)",
+              background: "var(--bg-elevated)",
+              fontSize: "13px",
+            }}
+          >
+            <p style={{ margin: "0 0 8px" }}>
+              Automatischer Start ist auf diesem PC eingerichtet.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                autostartLoeschen();
+                setMerken(false);
+                setAutostart("aus");
+              }}
+              disabled={loading}
+              style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", textDecoration: "underline", fontSize: "12px" }}
+            >
+              Einrichtung entfernen
+            </button>
+          </div>
+        )}
+
+        {/* Opt-in: Nur auf dem Sende-PC setzen - das Passwort liegt dann im Browser. */}
+        <div className="enter-d2" style={{ maxWidth: 340, margin: "0 auto 20px", textAlign: "left" }}>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", fontSize: "13px", color: "var(--fg-secondary)" }}>
+            <input
+              type="checkbox"
+              checked={merken}
+              onChange={(e) => setMerken(e.target.checked)}
+              style={{ accentColor: "var(--fg)", cursor: "pointer", marginTop: 2 }}
+              disabled={loading}
+            />
+            <span>
+              Auf diesem PC merken und beim Öffnen automatisch starten.
+              Nur am Sende-PC — das Passwort wird im Browser gespeichert.
+            </span>
+          </label>
+        </div>
+
         {/* CTA */}
         <div className="enter-d2">
           <button
             className="btn btn-dark"
-            onClick={createSession}
+            onClick={() =>
+              // Von Hand angelegt wird wie im Upstream immer neu - so lassen
+              // sich geaenderte Sprachen oder Anweisungen uebernehmen.
+              sessionStarten(formularWerte(), { merken, wiederEinsteigen: false })
+            }
             disabled={loading}
             id="create-session-btn"
           >

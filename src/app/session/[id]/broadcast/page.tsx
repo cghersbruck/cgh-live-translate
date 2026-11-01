@@ -1064,7 +1064,8 @@ function BroadcastControls({
               console.error("Failed to explicitly delete session on broadcast end:", err);
             }
             room.disconnect();
-            window.location.href = "/";
+            // ?beendet: sonst startet der Autostart der Startseite sofort neu.
+            window.location.href = "/?beendet";
           }}
           style={{ width: "100%" }}
         >
@@ -1178,7 +1179,7 @@ export default function BroadcastPage({
           </form>
           <button
             className="btn btn-ghost"
-            onClick={() => (window.location.href = "/")}
+            onClick={() => (window.location.href = "/?einrichten")}
             style={{ marginTop: 16 }}
           >
             Cancel
@@ -1196,7 +1197,7 @@ export default function BroadcastPage({
             Something went wrong
           </p>
           <p className="body-sm" style={{ marginBottom: 32 }}>{error}</p>
-          <button className="btn btn-outline" onClick={() => (window.location.href = "/")}>
+          <button className="btn btn-outline" onClick={() => (window.location.href = "/?einrichten")}>
             Go home
           </button>
         </div>

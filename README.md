@@ -101,6 +101,22 @@ dient [.env.example](.env.example).
    nicht und zeigt einen Hinweis.
 5. Hörer-Link bzw. QR-Code weitergeben.
 
+**Sende-PC einmalig einrichten:** Beim Anlegen den Haken *„Auf diesem PC
+merken"* setzen. Danach genügt es, die Startseite zu öffnen — Session und
+Mikrofon starten ohne Klick. Läuft die Session bereits (etwa nach einem
+Browserabsturz), steigt die Seite wieder ein, statt sie neu anzulegen. Zum
+Ändern der Einrichtung `/?einrichten` aufrufen.
+
+Damit Chrome den Ton ohne Klick freigibt, den Browser auf dem Sende-PC über
+eine Verknüpfung mit diesem Parameter starten:
+
+```
+chrome.exe --autoplay-policy=no-user-gesture-required https://<server>/
+```
+
+Ohne den Parameter erscheint auf der Sendeseite ein roter Knopf; ein Klick
+irgendwo auf die Seite genügt dann.
+
 Die Browser-Konsole zeigt nach dem Einschalten unter `Aufnahme-Einstellungen`,
 welches Gerät verwendet wird und ob die Signalaufbereitung wirklich
 abgeschaltet ist.
