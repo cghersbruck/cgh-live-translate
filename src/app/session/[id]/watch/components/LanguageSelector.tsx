@@ -19,6 +19,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { SUPPORTED_LANGUAGES, getLanguageByCode } from "@/lib/languages";
 import { getNativeLanguageName } from "@/config/gemeinde";
+import { useUiLanguage } from "@/components/UiLanguage";
 
 interface LanguageSelectorProps {
   sessionId: string;
@@ -38,6 +39,7 @@ export default function LanguageSelector({
   disabled = false,
   allowedLanguages,
 }: LanguageSelectorProps) {
+  const text = useUiLanguage();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Gescheiterte Anforderung, die in einer Minute wiederholt wird. Neues
@@ -155,7 +157,7 @@ export default function LanguageSelector({
   return (
     <div style={{ width: "100%" }}>
       <label htmlFor="language-select" className="label" style={{ display: "block", marginBottom: 10 }}>
-        Sprache / Language
+        {text.audioLanguage}
       </label>
 
       <div style={{ position: "relative" }}>
@@ -170,8 +172,8 @@ export default function LanguageSelector({
             cursor: (loading || disabled) ? "not-allowed" : "pointer",
           }}
         >
-          <option value="original">Original (Deutsch)</option>
-          <optgroup label="Übersetzungen">
+          <option value="original">{text.original}</option>
+          <optgroup label={text.translations}>
             {visibleLanguages.map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {getNativeLanguageName(lang.code, lang.name)} {lang.flag}
@@ -188,24 +190,24 @@ export default function LanguageSelector({
       </div>
 
       {/* State feedback */}
-      <div style={{ marginTop: 10, minHeight: 20 }}>
-        {currentLanguage !== "original" && currentLang && !loading && (
+      <div role="status" style={{ marginTop: 10, minHeight: 20 }}>
+        {currentLanguage !== "original" && currentLang && !loading && !error && (
           <span className="status status--active">
             <span className="status-dot pulse" />
-            Übersetzung nach {getNativeLanguageName(currentLang.code, currentLang.name)}
+            {text.translating} {getNativeLanguageName(currentLang.code, currentLang.name)}
           </span>
         )}
 
         {loading && (
           <span className="status status--waiting">
             <span className="status-dot pulse" />
-            Übersetzung wird gestartet …
+            {text.startingTranslation}
           </span>
         )}
 
         {error && (
           <span className="status status--error">
-            {error}
+            {text.translationError}
           </span>
         )}
       </div>

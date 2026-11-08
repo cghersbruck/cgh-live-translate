@@ -14,14 +14,18 @@
  * `RoomEvent.AudioPlaybackStatusChanged`).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { RoomEvent } from "livekit-client";
+import { UiLanguageSelector, useUiLanguage } from "@/components/UiLanguage";
 
 export default function TonStarten() {
   const room = useRoomContext();
+  const text = useUiLanguage();
   const [kannAbspielen, setKannAbspielen] = useState(true);
   const [laeuft, setLaeuft] = useState(false);
+  const startButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (!kannAbspielen) startButton.current?.focus(); }, [kannAbspielen]);
 
   useEffect(() => {
     if (!room) return;
@@ -51,6 +55,8 @@ export default function TonStarten() {
   return (
     <div
       role="dialog"
+      aria-modal="true"
+      aria-labelledby="audio-prompt-title"
       aria-live="assertive"
       style={{
         position: "fixed",
@@ -66,11 +72,13 @@ export default function TonStarten() {
         textAlign: "center",
       }}
     >
-      <p style={{ fontSize: 20, lineHeight: 1.4, color: "#fff", margin: 0, maxWidth: 420 }}>
-        Dein Telefon erlaubt den Ton erst nach einer Berührung.
+      <div style={{ color: "#fff" }}><UiLanguageSelector /></div>
+      <p id="audio-prompt-title" style={{ fontSize: 20, lineHeight: 1.4, color: "#fff", margin: 0, maxWidth: 420, fontWeight: 500 }}>
+        {text.audioPrompt}
       </p>
 
       <button
+        ref={startButton}
         onClick={starten}
         disabled={laeuft}
         style={{
@@ -80,19 +88,20 @@ export default function TonStarten() {
           minHeight: 88,
           padding: "24px 40px",
           fontSize: 26,
-          fontWeight: 600,
-          color: "#000",
-          background: "#fff",
+          fontWeight: 700,
+          fontFamily: "inherit",
+          color: "#fff",
+          background: "var(--accent)",
           border: "none",
-          borderRadius: 12,
+          borderRadius: 16,
           cursor: "pointer",
         }}
       >
-        {laeuft ? "Einen Moment …" : "Ton starten"}
+        {laeuft ? text.wait : text.startAudio}
       </button>
 
       <p style={{ fontSize: 15, color: "rgba(255,255,255,0.7)", margin: 0, maxWidth: 420 }}>
-        Danach läuft die Übersetzung von selbst weiter.
+        {text.audioContinues}
       </p>
     </div>
   );

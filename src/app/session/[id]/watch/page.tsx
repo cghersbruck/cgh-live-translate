@@ -24,11 +24,14 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { Track, RoomEvent } from "livekit-client";
+import { Track, RoomEvent, type RemoteParticipant } from "livekit-client";
 import LanguageSelector from "./components/LanguageSelector";
 import TonStarten from "@/components/TonStarten";
 import { getLanguageByCode } from "@/lib/languages";
 import { getNativeLanguageName } from "@/config/gemeinde";
+import { useUiLocale, useUiLanguage } from "@/components/UiLanguage";
+import { watchMessages } from "@/lib/watch-messages";
+import { watchEntryMessages } from "@/lib/watch-entry-messages";
 
 interface TranscriptEntry {
   id: string;
@@ -84,11 +87,14 @@ function AttendeeView({
   onStummChange: (stumm: boolean) => void;
 }) {
   const room = useRoomContext();
+  const locale = useUiLocale();
+  const text = watchMessages[locale];
+  const serviceName = watchEntryMessages[locale].service;
+  const originalName = useUiLanguage().original;
   const [currentLanguage, setCurrentLanguage] = useState("original");
   const [translatorIdentity, setTranslatorIdentity] = useState<string | null>(
     null
   );
-  const [isReceivingAudio, setIsReceivingAudio] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const currentLanguageRef = useRef(currentLanguage);
@@ -113,7 +119,8 @@ function AttendeeView({
 
   const [fontSize, setFontSize] = useState<number>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("watch_font_size");
+      let saved: string | null = null;
+      try { saved = localStorage.getItem("watch_font_size"); } catch { /* use default */ }
       if (saved) {
         const parsed = parseInt(saved, 10);
         if (!isNaN(parsed) && parsed >= 12 && parsed <= 28) {
@@ -125,7 +132,7 @@ function AttendeeView({
   });
 
   useEffect(() => {
-    localStorage.setItem("watch_font_size", fontSize.toString());
+    try { localStorage.setItem("watch_font_size", fontSize.toString()); } catch { /* keep current size */ }
   }, [fontSize]);
 
   const increaseFontSize = () => {
@@ -146,11 +153,11 @@ function AttendeeView({
       return;
     }
 
-    let wakeLock: any = null;
+    let wakeLock: WakeLockSentinel | null = null;
 
     async function requestWakeLock() {
       try {
-        wakeLock = await (navigator as any).wakeLock.request("screen");
+        wakeLock = await navigator.wakeLock.request("screen");
         setIsWakeLockActive(true);
         
         wakeLock.addEventListener("release", () => {
@@ -174,7 +181,7 @@ function AttendeeView({
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (wakeLock) {
-        wakeLock.release().catch((err: any) => {
+        wakeLock.release().catch((err: unknown) => {
           console.error("Failed to release Screen Wake Lock:", err);
         });
       }
@@ -274,7 +281,7 @@ function AttendeeView({
     room.on(RoomEvent.TrackUnpublished, handleUpdate);
     
     // Only run update if the participant that joined is the organizer or our translator bot
-    const handleParticipantConnected = (participant: any) => {
+    const handleParticipantConnected = (participant: RemoteParticipant) => {
       const isOrganizer = participant.identity.startsWith("organizer-");
       const isSelectedTranslator =
         translatorIdentity && participant.identity === translatorIdentity;
@@ -312,8 +319,7 @@ function AttendeeView({
     };
   }, [room, currentLanguage]);
 
-  useEffect(() => {
-    const hasAudio = audioTracks.some((t) => {
+  const isReceivingAudio = audioTracks.some((t) => {
       const pub = t.publication;
       if (currentLanguage === "original") {
         return t.participant.identity.startsWith("organizer-") && pub.isSubscribed && !pub.isMuted;
@@ -326,8 +332,6 @@ function AttendeeView({
         );
       }
     });
-    setIsReceivingAudio(hasAudio);
-  }, [audioTracks, currentLanguage, translatorIdentity]);
 
   // Unsubscribe from translation when tab closes
   useEffect(() => {
@@ -463,13 +467,13 @@ function AttendeeView({
     const lang = getLanguageByCode(currentLanguage);
     const sprachName =
       currentLanguage === "original"
-        ? "Original"
+        ? originalName
         : getNativeLanguageName(currentLanguage, lang?.name ?? currentLanguage);
 
     ms.metadata = new MediaMetadata({
-      title: "Live-Übersetzung",
+      title: text.title,
       artist: sprachName,
-      album: "Gottesdienst",
+      album: serviceName,
     });
     ms.playbackState = stumm ? "paused" : "playing";
 
@@ -490,7 +494,7 @@ function AttendeeView({
       setzen("stop", null);
       ms.metadata = null;
     };
-  }, [currentLanguage, stumm, onStummChange, handleStop]);
+  }, [currentLanguage, stumm, onStummChange, handleStop, text.title, serviceName, originalName]);
 
   // --- Stoerungshinweis ----------------------------------------------------
   //
@@ -527,31 +531,25 @@ function AttendeeView({
       {/* Header */}
       <div style={{ marginBottom: 40 }}>
         <h1 className="display display-lg" style={{ marginBottom: 8 }}>
-          <em>Übersetzung</em>
+          {text.title}
         </h1>
-        <p className="mono">{sessionId}</p>
+        <p className="meta">{sessionId}</p>
         <button
           onClick={handleStop}
           className="btn btn-outline"
           style={{ marginTop: 16, padding: "10px 20px", fontSize: 14 }}
         >
-          ■ Beenden
+          {text.stop}
         </button>
       </div>
 
       {unterbrochen && (
         <div
           role="status"
-          style={{
-            marginBottom: 24,
-            padding: "14px 18px",
-            background: "var(--warning-soft)",
-            border: "1px solid var(--warning)",
-            borderRadius: 6,
-          }}
+          className="notice notice--warning"
+          style={{ marginBottom: 24 }}
         >
-          Die Übersetzung ist gerade unterbrochen. Sie startet von selbst wieder —
-          diese Seite einfach geöffnet lassen.
+          {text.interrupted}
         </div>
       )}
 
@@ -571,19 +569,21 @@ function AttendeeView({
               ))}
             </div>
 
+            <div role="status">
             {isConnected ? (
               <span className="status status--active">
                 <span className="status-dot pulse" />
                 {currentLanguage === "original"
-                  ? "Original"
+                  ? originalName
                   : currentLanguage.toUpperCase()}
               </span>
             ) : (
               <span className="status status--waiting">
                 <span className="status-dot pulse" />
-                Warte auf die Übertragung
+                {text.waiting}
               </span>
             )}
+            </div>
 
             {isWakeLockActive && (
               <span
@@ -592,9 +592,9 @@ function AttendeeView({
                   marginLeft: 12,
                   padding: "4px 8px",
                   background: "var(--success-soft)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "4px",
-                  fontSize: "11px",
+                  color: "var(--success-ink)",
+                  borderRadius: "6px",
+                  fontSize: "12px",
                 }}
               >
                 <svg
@@ -612,17 +612,15 @@ function AttendeeView({
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
-                Bildschirm bleibt an
+                {text.screenOn}
               </span>
             )}
           </div>
         </div>
       </div>
 
-      <hr className="rule" />
-
       {/* Language selector */}
-      <div style={{ padding: "28px 0" }}>
+      <div style={{ padding: "24px 0" }}>
         <LanguageSelector
           sessionId={sessionId}
           currentLanguage={currentLanguage}
@@ -632,10 +630,8 @@ function AttendeeView({
         />
       </div>
 
-      <hr className="rule" />
-
       {/* Transcription output */}
-      <div style={{ padding: "28px 0" }}>
+      <div style={{ padding: "8px 0 24px" }}>
         <div
           style={{
             display: "flex",
@@ -644,7 +640,7 @@ function AttendeeView({
             marginBottom: 16,
           }}
         >
-          <span className="label">Mitschrift</span>
+          <h2 className="label" style={{ fontSize: 16, color: "var(--fg)" }}>{text.transcript}</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
               onClick={decreaseFontSize}
@@ -653,14 +649,15 @@ function AttendeeView({
                 background: "transparent",
                 border: "1px solid var(--border)",
                 color: "var(--fg-secondary)",
-                padding: "4px 10px",
-                fontSize: "12px",
-                fontFamily: "var(--font-mono)",
+                padding: "5px 12px",
+                fontSize: "13px",
+                borderRadius: "8px",
                 cursor: fontSize <= 12 ? "not-allowed" : "pointer",
                 opacity: fontSize <= 12 ? 0.4 : 1,
                 transition: "all 0.2s ease",
               }}
-              title="Schrift kleiner"
+              title={text.smaller}
+              aria-label={text.smaller}
             >
               A-
             </button>
@@ -671,14 +668,15 @@ function AttendeeView({
                 background: "transparent",
                 border: "1px solid var(--border)",
                 color: "var(--fg-secondary)",
-                padding: "4px 10px",
-                fontSize: "12px",
-                fontFamily: "var(--font-mono)",
+                padding: "5px 12px",
+                fontSize: "13px",
+                borderRadius: "8px",
                 cursor: fontSize >= 28 ? "not-allowed" : "pointer",
                 opacity: fontSize >= 28 ? 0.4 : 1,
                 transition: "all 0.2s ease",
               }}
-              title="Schrift größer"
+              title={text.larger}
+              aria-label={text.larger}
             >
               A+
             </button>
@@ -695,8 +693,8 @@ function AttendeeView({
           {transcripts.length === 0 ? (
             <p className="body-sm italic">
               {currentLanguage === "original"
-                ? "Sprache wählen, um die Mitschrift zu sehen"
-                : "Warte auf die Übersetzung …"}
+                ? text.selectToRead
+                : text.waitingTranslation}
             </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -727,10 +725,8 @@ function AttendeeView({
         </div>
       </div>
 
-      <hr className="rule" />
-
-      <p className="body-sm" style={{ paddingTop: 28 }}>
-        Übersetzung in Echtzeit erzeugt von <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-live-3-5-translate/" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline", color: "inherit" }}>Gemini 3.5 Live Translate</a>.
+      <p className="body-sm meta" style={{ paddingTop: 24 }}>
+        {text.realtime} <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-live-3-5-translate/" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline", color: "inherit" }}>Gemini 3.5 Live Translate</a>.
       </p>
     </div>
   );
@@ -743,6 +739,7 @@ export default function WatchPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: sessionId } = use(params);
+  const entryText = watchEntryMessages[useUiLocale()];
   const [token, setToken] = useState("");
   const [livekitUrl, setLivekitUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -777,19 +774,20 @@ export default function WatchPage({
     return (
       <div className="page">
         <div className="container" style={{ textAlign: "center" }}>
-          <p className="display display-md" style={{ marginBottom: 16 }}>
-            {isInactiveSession ? "Die Übertragung läuft noch nicht" : "Es ist ein Fehler aufgetreten"}
-          </p>
+          <h1 className="display display-md" style={{ marginBottom: 16 }}>
+            {isInactiveSession ? entryText.inactive : entryText.error}
+          </h1>
           <p className="body-sm" style={{ marginBottom: 32 }}>
             {isInactiveSession
-              ? "Sobald der Gottesdienst beginnt, kannst du hier mithören. Diese Seite geöffnet lassen und gleich erneut prüfen."
-              : error}
+              ? entryText.inactiveHelp
+              : entryText.errorHelp}
           </p>
+          {!isInactiveSession && <p className="body-sm" style={{ marginBottom: 24 }}>{entryText.details}: {error}</p>}
           <button
             className="btn btn-outline"
             onClick={() => window.location.reload()}
           >
-            {isInactiveSession ? "Erneut prüfen" : "Nochmal versuchen"}
+            {entryText.retry}
           </button>
         </div>
       </div>
@@ -801,7 +799,7 @@ export default function WatchPage({
       <div className="page">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <div className="spinner" />
-          <p className="mono">Verbinde …</p>
+          <p className="meta">{entryText.connecting}</p>
         </div>
       </div>
     );
@@ -812,13 +810,13 @@ export default function WatchPage({
       <div className="page">
         <div className="container enter" style={{ textAlign: "center" }}>
           <h1 className="display display-lg" style={{ marginBottom: 12 }}>
-            <em>Bereit</em>
+            {entryText.ready}
           </h1>
           <p className="body-sm" style={{ marginBottom: 40 }}>
-            Zum Mithören tippen. Danach den Ton freigeben.
+            {entryText.readyHelp}
           </p>
           <button
-            className="btn"
+            className="btn btn-dark"
             onClick={() => {
               // Audio Session API (Safari 16.4+): als Wiedergabe statt als
               // Umgebungston einstufen. Kann iOS dazu bringen, den Ton bei
@@ -839,10 +837,10 @@ export default function WatchPage({
               setStarted(true);
             }}
           >
-            Übersetzung anhören
+            {entryText.listen}
           </button>
-          <p className="mono" style={{ marginTop: 32, fontSize: 12 }}>
-            Gottesdienst · {sessionId}
+          <p className="meta" style={{ marginTop: 32 }}>
+            {entryText.service} · {sessionId}
           </p>
         </div>
       </div>

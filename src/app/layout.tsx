@@ -14,13 +14,18 @@
  * limitations under the License.
  */
 
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { UiLanguageProvider, UiLanguageSelector } from "@/components/UiLanguage";
 
 export const metadata: Metadata = {
-  title: "Live Translate",
+  title: "Live-Übersetzung",
   description:
-    "Real-time broadcast translation powered by the Gemini Live API.",
+    "Predigt live übersetzen: Besucher wählen ihre Sprache und hören in Echtzeit mit.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0f1825",
 };
 
 export default function RootLayout({
@@ -29,8 +34,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="de">
+      <body><UiLanguageProvider><div style={{ position: "absolute", top: 12, right: 20, zIndex: 10 }}><UiLanguageSelector /></div>{children}</UiLanguageProvider></body>
     </html>
   );
 }

@@ -14,34 +14,54 @@
  * limitations under the License.
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300;1,9..40,400&family=DM+Mono:wght@300;400&display=swap');
+/**
+ * Farben der Christengemeinde Hersbruck: Papier, Dunkelblau und Gold.
+ * Das dunklere Gold sorgt bei kleinen Bedienelementen für guten Kontrast.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
 :root {
-  --font-display: 'Instrument Serif', Georgia, serif;
-  --font-body: 'DM Sans', system-ui, sans-serif;
-  --font-mono: 'DM Mono', 'SF Mono', monospace;
+  --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
 
-  --bg: #F6F4F0;
-  --bg-elevated: #EDEAE4;
-  --bg-inset: #E5E2DB;
+  /* Flaechen */
+  --bg: #faf6f0;
+  --bg-elevated: #f3ecdf;
+  --bg-inset: #f1e7d8;
+  --surface: #ffffff;
 
-  --fg: #1A1917;
-  --fg-secondary: #6B6860;
-  --fg-tertiary: #9C9890;
-  --fg-ghost: #C4C0B8;
+  /* Text */
+  --fg: #0f1825;
+  --fg-secondary: #43536a;
+  --fg-tertiary: #526075;
+  --fg-ghost: #687587;
 
-  --accent: #C8432B;
-  --accent-soft: rgba(200, 67, 43, 0.08);
+  /* Linien (Tonschritt statt Schatten) */
+  --border: #d9d1c5;
+  --border-control: #897f72;
+  --border-light: #e9e1d5;
+  --rule: #e9e1d5;
 
-  --border: #DAD7D0;
-  --border-light: #EDEAE4;
+  /* Dunkles Gold für Bedienelemente, helle Töne für Flächen */
+  --accent: #7e5b0e;
+  --accent-soft: #f7f0e1;
+  --accent-track: #ead8b3;
+  --accent-ink: #684908;
 
-  --success: #2D7D46;
-  --success-soft: rgba(45, 125, 70, 0.08);
-  --warning: #A07B1A;
-  --warning-soft: rgba(160, 123, 26, 0.08);
-  --error: #B33A2D;
-  --error-soft: rgba(179, 58, 45, 0.08);
+  /* Einmal entschieden: Radius 8 */
+  --radius-card: 8px;
+  --radius-control: 8px;
+
+  /* Zustandsfarben: blasse Flaeche, dunkle Schrift derselben Familie */
+  --success: #2a7a4b;
+  --success-soft: #e7f2ea;
+  --success-ink: #1e5634;
+  --warning: #96660f;
+  --warning-soft: #f9f0dd;
+  --warning-ink: #6f4d0b;
+  --error: #b8372c;
+  --error-soft: #f9e8e5;
+  --error-ink: #7e251d;
 }
 
 *,
@@ -65,7 +85,87 @@ body {
   line-height: 1.6;
   color: var(--fg);
   background: var(--bg);
-  min-height: 100vh;
+  min-height: 100svh;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--accent-track);
+  color: var(--accent-ink);
+}
+
+/* ——————————————————————————————————————
+   Home — Kopfbereich, zwei Spalten ab 900px,
+   eine Spalte darunter (Formular zuerst).
+   —————————————————————————————————————— */
+
+.home {
+  width: 100%;
+  max-width: 980px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.home-head {
+  margin-bottom: 40px;
+}
+
+.home-grid {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+.home-form {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  order: -1;
+}
+
+.home-steps {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+@media (min-width: 900px) {
+  .home {
+    align-items: stretch;
+    text-align: left;
+  }
+
+  .home-head {
+    margin-bottom: 48px;
+  }
+
+  .home-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 72px;
+    align-items: start;
+  }
+
+  .home-form,
+  .home-steps {
+    max-width: none;
+    order: 0;
+  }
 }
 
 /* ——————————————————————————————————————
@@ -73,76 +173,79 @@ body {
    —————————————————————————————————————— */
 
 .page {
-  min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 24px;
+  padding: 32px 20px;
 }
 
 .page-top {
   justify-content: flex-start;
-  padding-top: 80px;
+  padding-top: 56px;
 }
 
 .container {
   width: 100%;
   max-width: 440px;
+  padding: 0 4px;
+}
+
+/* Sendeseite: Arbeitsflaeche auf dem Desktop, bleibt schmal genug
+   fuer den Notebook neben dem Mischpult. */
+.container-wide {
+  max-width: 620px;
 }
 
 /* ——————————————————————————————————————
-   Typography
+   Type
    —————————————————————————————————————— */
 
 .display {
-  font-family: var(--font-display);
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
   color: var(--fg);
+  font-variant-numeric: tabular-nums;
 }
 
 .display-xl {
-  font-size: clamp(52px, 10vw, 80px);
+  font-size: clamp(26px, 3vw, 32px);
 }
 
 .display-lg {
-  font-size: clamp(36px, 7vw, 52px);
+  font-size: clamp(22px, 2.6vw, 26px);
 }
 
 .display-md {
-  font-size: clamp(28px, 5vw, 36px);
+  font-size: clamp(20px, 2.4vw, 22px);
 }
 
 .body {
-  font-family: var(--font-body);
   font-size: 15px;
-  line-height: 1.65;
+  line-height: 1.6;
   color: var(--fg-secondary);
 }
 
 .body-sm {
-  font-family: var(--font-body);
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--fg-tertiary);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-secondary);
 }
 
 .label {
-  font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-tertiary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-secondary);
 }
 
-.mono {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 300;
-  letter-spacing: 0.02em;
+.meta {
+  font-size: 12.5px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
   color: var(--fg-tertiary);
 }
 
@@ -151,19 +254,7 @@ body {
 }
 
 /* ——————————————————————————————————————
-   Separator
-   —————————————————————————————————————— */
-
-.rule {
-  width: 100%;
-  height: 1px;
-  background: var(--border);
-  border: none;
-  margin: 0;
-}
-
-/* ——————————————————————————————————————
-   Buttons
+   Buttons — flach, ein Radius, eine gefüllte Sorte
    —————————————————————————————————————— */
 
 .btn {
@@ -171,28 +262,34 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 14px 32px;
+  padding: 13px 28px;
   font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   border: none;
+  border-radius: var(--radius-control);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, opacity 0.15s ease;
   text-decoration: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
 }
 
 .btn-dark {
   background: var(--fg);
   color: var(--bg);
-  border-radius: 0;
 }
 
 .btn-dark:hover {
-  background: #333028;
+  background: #17324d;
 }
 
 .btn-dark:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -200,19 +297,24 @@ body {
   background: transparent;
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 0;
+  padding: 12px 24px;
+  font-size: 14px;
 }
 
 .btn-outline:hover {
-  border-color: var(--fg);
+  border-color: var(--fg-tertiary);
+  background: var(--surface);
 }
 
 .btn-ghost {
   background: transparent;
   color: var(--fg-secondary);
   border: none;
-  padding: 8px 16px;
-  font-size: 13px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .btn-ghost:hover {
@@ -220,20 +322,20 @@ body {
 }
 
 .btn-danger {
-  background: transparent;
-  color: var(--error);
-  border: 1px solid var(--error);
-  border-radius: 0;
-  padding: 12px 24px;
+  background: var(--error-soft);
+  color: var(--error-ink);
+  border: none;
+  border-radius: 8px;
+  padding: 13px 24px;
   font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14.5px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 
 .btn-danger:hover {
-  background: var(--error-soft);
+  background: #f3d6d2;
 }
 
 /* ——————————————————————————————————————
@@ -245,55 +347,74 @@ body {
 }
 
 .card {
-  border: 1px solid var(--border);
-  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+/* Eingebettete Panel (Audio-Eingaenge, Kosten) */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 16px;
 }
 
 /* ——————————————————————————————————————
-   Select
+   Select & Input
    —————————————————————————————————————— */
 
 .select-field {
   width: 100%;
-  padding: 14px 40px 14px 16px;
+  padding: 13px 44px 13px 14px;
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0;
+  background-color: var(--surface);
+  border: 1px solid var(--border-control);
+  border-radius: 8px;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236B6860' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236d645d' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 16px center;
   cursor: pointer;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.15s ease;
 }
+
+.select-field--small { width: auto; padding: 6px 32px 6px 10px; font-size: 13px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .select-field:hover {
   border-color: var(--fg-tertiary);
 }
 
 .select-field:focus {
-  outline: none;
-  border-color: var(--fg);
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 1px;
+  border-color: var(--accent);
 }
 
 .select-field option {
   font-family: var(--font-body);
-  background: var(--bg);
+  background: var(--surface);
+  color: var(--fg);
 }
 
 .input-field {
   width: 100%;
-  padding: 14px 16px;
+  padding: 13px 14px;
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  transition: border-color 0.2s ease;
+  background: var(--surface);
+  border: 1px solid var(--border-control);
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.input-field::placeholder {
+  color: var(--fg-ghost);
 }
 
 .input-field:hover {
@@ -301,28 +422,30 @@ body {
 }
 
 .input-field:focus {
-  outline: none;
-  border-color: var(--fg);
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 1px;
+  border-color: var(--accent);
 }
 
 /* ——————————————————————————————————————
-   Status
+   Status — Punktcollor = die Marke
    —————————————————————————————————————— */
 
 .status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 300;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: currentColor;
+  flex-shrink: 0;
 }
 
 .status-dot.pulse {
@@ -330,14 +453,22 @@ body {
 }
 
 .status--active {
+  color: var(--success-ink);
+}
+
+.status--active .status-dot {
   color: var(--success);
 }
 
 .status--waiting {
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 .status--error {
+  color: var(--error-ink);
+}
+
+.status--error .status-dot {
   color: var(--error);
 }
 
@@ -346,22 +477,43 @@ body {
   50% { opacity: 0.3; }
 }
 
+/* Hinweisfenster (Stoerung, Wartung) — blasse Tinte, dunkle Schrift */
+.notice {
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.notice--warning {
+  background: var(--warning-soft);
+  color: var(--warning-ink);
+  border: 1px solid var(--warning);
+}
+
+.notice--error {
+  background: var(--error-soft);
+  color: var(--error-ink);
+  border: 1px solid var(--error);
+}
+
 /* ——————————————————————————————————————
-   Audio indicator — minimal waveform
+   Waveform — das Zeichen dieser App: nur bewegt
+   es sich, fliesst wirklich Ton.
    —————————————————————————————————————— */
 
 .waveform {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   height: 32px;
   padding: 0 4px;
 }
 
 .waveform-bar {
-  width: 2px;
-  background: var(--fg);
-  border-radius: 1px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 2px;
   transition: height 0.15s ease;
 }
 
@@ -377,7 +529,7 @@ body {
 
 @keyframes wave {
   0%, 100% { height: 4px; }
-  50% { height: 28px; }
+  50% { height: 26px; }
 }
 
 .waveform.idle .waveform-bar {
@@ -386,31 +538,44 @@ body {
   background: var(--fg-ghost);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .waveform.active .waveform-bar,
+  .status-dot.pulse {
+    animation: none;
+  }
+  .waveform.active .waveform-bar {
+    height: 26px;
+  }
+  .enter, .enter-d1, .enter-d2, .enter-d3, .enter-d4 {
+    animation: none;
+  }
+}
+
 /* ——————————————————————————————————————
    QR Code
    —————————————————————————————————————— */
 
 .qr-wrap {
   padding: 12px;
-  background: white;
+  background: var(--surface);
   display: inline-block;
   border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 /* ——————————————————————————————————————
-   Translation list
+   Sprachzeilen — Flaeche: blasse Tinten, keine Linien
    —————————————————————————————————————— */
 
 .lang-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border-light);
-}
-
-.lang-row:last-child {
-  border-bottom: none;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 11px 12px;
 }
 
 .lang-row-left {
@@ -425,17 +590,35 @@ body {
 }
 
 .lang-name {
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 400;
+  font-size: 14.5px;
+  font-weight: 500;
   color: var(--fg);
 }
 
 .lang-meta {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 300;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--fg-tertiary);
+}
+
+/* Sprach-Chips auf der Startseite: aktive Auswahl in blasser Marke */
+.lang-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border: 1px solid var(--accent-track);
+  border-radius: 99px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.lang-chip:hover {
+  background: var(--accent-track);
 }
 
 /* ——————————————————————————————————————
@@ -445,8 +628,8 @@ body {
 .spinner {
   width: 18px;
   height: 18px;
-  border: 1.5px solid var(--border);
-  border-top-color: var(--fg);
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -455,14 +638,20 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
 /* ——————————————————————————————————————
-   Entrance animation — very subtle
+   Entrance — sehr dezent, einmal beim Laden
    —————————————————————————————————————— */
 
 @keyframes enter {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -470,11 +659,11 @@ body {
   }
 }
 
-.enter { animation: enter 0.6s ease both; }
-.enter-d1 { animation: enter 0.6s ease 0.1s both; }
-.enter-d2 { animation: enter 0.6s ease 0.2s both; }
-.enter-d3 { animation: enter 0.6s ease 0.3s both; }
-.enter-d4 { animation: enter 0.6s ease 0.4s both; }
+.enter { animation: enter 0.4s ease both; }
+.enter-d1 { animation: enter 0.4s ease 0.06s both; }
+.enter-d2 { animation: enter 0.4s ease 0.12s both; }
+.enter-d3 { animation: enter 0.4s ease 0.18s both; }
+.enter-d4 { animation: enter 0.4s ease 0.24s both; }
 
 /* ——————————————————————————————————————
    Responsive
@@ -482,15 +671,16 @@ body {
 
 @media (max-width: 520px) {
   .page {
-    padding: 24px 20px;
+    padding: 24px 16px;
   }
 
   .page-top {
-    padding-top: 48px;
+    padding-top: 40px;
   }
 
-  .card {
-    padding: 20px;
+  .card,
+  .panel {
+    padding: 16px;
   }
 
   .btn-dark {

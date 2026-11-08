@@ -12,6 +12,8 @@
  */
 
 import { useEffect, useRef } from "react";
+import { useUiLocale } from "@/components/UiLanguage";
+import { reviewMessages } from "@/lib/review-messages";
 
 export interface CompanionControlProps {
   sessionId: string;
@@ -42,6 +44,7 @@ export default function CompanionControl({
   //
   // Die Zuweisung gehoert in einen Effekt, nicht in den Renderdurchlauf: Refs
   // waehrend des Renderns zu beschreiben ist in React nicht zulaessig.
+  const locale = useUiLocale();
   const cb = useRef({ onStart, onPause, onResume, onStop });
   useEffect(() => {
     cb.current = { onStart, onPause, onResume, onStop };
@@ -116,8 +119,8 @@ export default function CompanionControl({
   }, [sessionId]);
 
   return (
-    <p className="mono" style={{ fontSize: 12, opacity: 0.6, marginTop: 8 }}>
-      Companion-Steuerung aktiv · Session {sessionId}
+    <p className="meta" style={{ fontSize: 12, marginTop: 8 }}>
+      {reviewMessages[locale].companion} {sessionId}
     </p>
   );
 }

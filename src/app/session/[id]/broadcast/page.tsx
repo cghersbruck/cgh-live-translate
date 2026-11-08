@@ -19,14 +19,18 @@
 import { useEffect, useState, useCallback, use, useRef, FormEvent } from "react";
 import {
   LiveKitRoom,
-  useLocalParticipant,
   useRoomContext,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { Track, RoomEvent } from "livekit-client";
+import { Track, RoomEvent, type LocalTrackPublication } from "livekit-client";
 import SessionQRCode from "@/components/SessionQRCode";
 import CompanionControl from "@/components/CompanionControl";
+import { useUiLocale } from "@/components/UiLanguage";
+import { broadcastExtra, broadcastMessages } from "@/lib/broadcast-messages";
 import { getLanguageByCode } from "@/lib/languages";
+import { languageLabel } from "@/lib/language-search";
+import type { UiLocale } from "@/lib/ui-locale";
+import { reviewMessages, listenerLabel } from "@/lib/review-messages";
 import {
   einstellungenLaden,
   einstellungenSpeichern,
@@ -55,10 +59,10 @@ interface SessionKosten {
   eurKurs: number | null;
 }
 
-function betrag(usd: number, eurKurs: number | null): string {
-  const dollar = usd.toLocaleString("de-DE", { style: "currency", currency: "USD" });
+function betrag(usd: number, eurKurs: number | null, locale: UiLocale): string {
+  const dollar = usd.toLocaleString(locale, { style: "currency", currency: "USD" });
   if (!eurKurs) return dollar;
-  const euro = (usd * eurKurs).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+  const euro = (usd * eurKurs).toLocaleString(locale, { style: "currency", currency: "EUR" });
   return `${euro} (${dollar})`;
 }
 
@@ -80,7 +84,9 @@ function BroadcastControls({
   onEndBroadcast: () => void;
 }) {
   const room = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
+  const locale = useUiLocale();
+  const text = broadcastMessages[locale];
+  const extra = broadcastExtra[locale];
   const [translations, setTranslations] = useState<TranslationInfo[]>([]);
   const [kosten, setKosten] = useState<SessionKosten | null>(null);
   const [listenerCount, setListenerCount] = useState(0);
@@ -133,11 +139,11 @@ function BroadcastControls({
       return;
     }
 
-    let wakeLock: any = null;
+    let wakeLock: WakeLockSentinel | null = null;
 
     async function requestWakeLock() {
       try {
-        wakeLock = await (navigator as any).wakeLock.request("screen");
+        wakeLock = await navigator.wakeLock.request("screen");
         setIsWakeLockActive(true);
         
         wakeLock.addEventListener("release", () => {
@@ -161,7 +167,7 @@ function BroadcastControls({
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (wakeLock) {
-        wakeLock.release().catch((err: any) => {
+        wakeLock.release().catch((err: unknown) => {
           console.error("Failed to release Screen Wake Lock:", err);
         });
       }
@@ -177,7 +183,7 @@ function BroadcastControls({
   const tabStreamRef = useRef<MediaStream | null>(null);
   const tabSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const tabGainNodeRef = useRef<GainNode | null>(null);
-  const publishedTrackPubRef = useRef<any>(null);
+  const publishedTrackPubRef = useRef<LocalTrackPublication | null>(null);
 
 
 
@@ -185,17 +191,6 @@ function BroadcastControls({
     typeof window !== "undefined"
       ? `${window.location.origin}/session/${sessionId}/watch`
       : "";
-
-  const fetchTranslations = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/translate/status?sessionId=${sessionId}`);
-      const data = await res.json();
-      setTranslations(data.translations || []);
-      setKosten(data.kosten ?? null);
-    } catch (err) {
-      console.error("Failed to fetch translations:", err);
-    }
-  }, [sessionId]);
 
   const [systemInstruction, setSystemInstruction] = useState<string | null>(null);
 
@@ -217,21 +212,31 @@ function BroadcastControls({
   }, [sessionId]);
 
   useEffect(() => {
+    async function fetchTranslations() {
+      try {
+        const res = await fetch(`/api/translate/status?sessionId=${sessionId}`);
+        const data = await res.json();
+        setTranslations(data.translations || []);
+        setKosten(data.kosten ?? null);
+      } catch (err) {
+        console.error("Failed to fetch translations:", err);
+      }
+    }
     fetchTranslations();
     const interval = setInterval(fetchTranslations, 3000);
     return () => clearInterval(interval);
-  }, [fetchTranslations]);
+  }, [sessionId]);
 
   // Main AudioContext and track publishing lifecycle
   useEffect(() => {
     if (!room || !room.localParticipant) return;
 
     let active = true;
-    let localPub: any = null;
+    let localPub: LocalTrackPublication | null = null;
 
     async function initAudio() {
       try {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         const ctx = new AudioContextClass();
         audioContextRef.current = ctx;
         setAudioGesperrt(ctx.state === "suspended");
@@ -262,7 +267,7 @@ function BroadcastControls({
 
     return () => {
       active = false;
-      if (localPub && room.localParticipant) {
+      if (localPub?.track && room.localParticipant) {
         room.localParticipant.unpublishTrack(localPub.track).catch((err) => {
           console.error("Failed to unpublish mixed track:", err);
         });
@@ -316,11 +321,11 @@ function BroadcastControls({
     if (hasActiveInput) {
       pub.unmute()
         .then(() => console.log("[BroadcastControls] Unmuted broadcast-audio track"))
-        .catch((err: any) => console.error("Failed to unmute track:", err));
+        .catch((err: unknown) => console.error("Failed to unmute track:", err));
     } else {
       pub.mute()
         .then(() => console.log("[BroadcastControls] Muted broadcast-audio track"))
-        .catch((err: any) => console.error("Failed to mute track:", err));
+        .catch((err: unknown) => console.error("Failed to mute track:", err));
     }
   }, [isMicEnabled, isTabAudioEnabled, isPaused]);
 
@@ -372,7 +377,7 @@ function BroadcastControls({
   ): Promise<string | null> => {
     const ctx = audioContextRef.current;
     const dest = destinationNodeRef.current;
-    if (!ctx || !dest) return "Audio-Mixer noch nicht bereit";
+    if (!ctx || !dest) return text.mixer;
 
     // Bewusst ohne await: Ohne Benutzeraktion (Autostart nach Neuladen) bleibt
     // das Promise in Chrome haengen, bis jemand klickt. Der Graph wird trotzdem
@@ -445,7 +450,7 @@ function BroadcastControls({
       console.error("Failed to access microphone:", err);
       const e = err as Error;
       return e.name === "OverconstrainedError" || e.name === "NotFoundError"
-        ? "Mikrofon nicht gefunden – ist es angeschlossen?"
+        ? text.micMissing
         : e.message;
     }
   };
@@ -461,7 +466,7 @@ function BroadcastControls({
       return;
     }
     const fehler = await startMicrophone(gewaehltesMikrofon);
-    if (fehler) alert("Could not access microphone: " + fehler);
+    if (fehler) alert(text.micAccess + fehler);
   };
 
   const mikrofonWechseln = async (deviceId: string) => {
@@ -471,7 +476,7 @@ function BroadcastControls({
     const fehler = await startMicrophone(deviceId);
     if (fehler) {
       setGewaehltesMikrofon(vorher);
-      alert("Could not switch microphone: " + fehler);
+      alert(text.micSwitch + fehler);
     }
   };
 
@@ -553,7 +558,7 @@ function BroadcastControls({
         const audioTracks = stream.getAudioTracks();
         if (audioTracks.length === 0) {
           stream.getTracks().forEach((track) => track.stop());
-          alert("No audio track selected. Make sure to check the 'Share tab audio' checkbox in the system sharing prompt.");
+          alert(text.tabMissing);
           return;
         }
 
@@ -593,7 +598,7 @@ function BroadcastControls({
       } catch (err) {
         console.error("Failed to capture tab audio:", err);
         if ((err as Error).name !== "NotAllowedError") {
-          alert("Could not capture tab audio: " + (err as Error).message);
+          alert(reviewMessages[locale].tabError + ": " + (err as Error).message);
         }
       }
     }
@@ -616,60 +621,56 @@ function BroadcastControls({
   };
 
   const isAudioActive = isMicEnabled || isTabAudioEnabled;
-  let statusText = "Muted";
+  let statusText = text.muted;
   // Pause zuerst pruefen: Sie ueberlagert die Eingangsanzeige, sonst stuende
   // dort "Live", obwohl gerade nichts uebertragen wird.
   if (isPaused && isAudioActive) {
-    statusText = "Pausiert - Ton angehalten";
+    statusText = text.paused;
   } else
   if (isMicEnabled && isTabAudioEnabled) {
-    statusText = "Live (Mic + Tab)";
+    statusText = text.liveBoth;
   } else if (isMicEnabled) {
-    statusText = "Live (Mic)";
+    statusText = text.liveMic;
   } else if (isTabAudioEnabled) {
-    statusText = "Live (Tab)";
+    statusText = text.liveBrowser;
   }
 
   return (
-    <div className="container enter">
+    <div className="container container-wide enter">
       {/* Header */}
-      <div style={{ marginBottom: 48 }}>
+      <div style={{ marginBottom: 40 }}>
         <h1 className="display display-lg" style={{ marginBottom: 8 }}>
-          Broadcasting
+          {text.broadcast}
         </h1>
-        <p className="mono">{sessionId}</p>
+        <p className="meta">{sessionId}</p>
       </div>
 
       {/* Stoerungsbanner. Nicht zu uebersehen, mit Grund in Klartext. */}
       {translations.some((t) => t.gesundheit === "gestoert") && (
         <div
           role="alert"
-          style={{
-            margin: "0 0 24px",
-            padding: "16px 20px",
-            background: "var(--error-soft)",
-            border: "2px solid var(--error)",
-            borderRadius: 6,
-            textAlign: "left",
-          }}
+          className="notice notice--error"
+          style={{ margin: "0 0 24px" }}
         >
-          <strong style={{ display: "block", marginBottom: 6, color: "var(--error)" }}>
-            Übersetzung ausgefallen
+          <strong style={{ display: "block", marginBottom: 6 }}>
+            {text.failed}
           </strong>
           {translations
             .filter((t) => t.gesundheit === "gestoert")
             .map((t) => (
               <p key={t.language} className="body-sm" style={{ margin: "4px 0" }}>
-                <strong>{getLanguageByCode(t.language)?.name ?? t.language}:</strong>{" "}
-                {t.stoerung?.text ?? "unbekannter Grund"}
+                <strong>{getLanguageByCode(t.language) ? languageLabel(getLanguageByCode(t.language)!, locale) : t.language}:</strong>{" "}
+                {t.stoerung?.text ?? text.unknown}
                 {t.stoerung?.seit
-                  ? ` · seit ${new Date(t.stoerung.seit).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`
+                  ? (() => {
+                      const time = new Date(t.stoerung.seit).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                      return ` · ${locale === "hu" ? `${time} ${text.since}` : `${text.since} ${time}${locale === "zh-Hans" ? " 起" : ""}`}`;
+                    })()
                   : ""}
               </p>
             ))}
           <p className="body-sm" style={{ margin: "8px 0 0", opacity: 0.75 }}>
-            Es wird jede Minute automatisch ein neuer Versuch gestartet, solange
-            jemand zuhört.
+            {text.retry}
           </p>
         </div>
       )}
@@ -711,8 +712,8 @@ function BroadcastControls({
               ))}
             </div>
             <span
-              className="status"
-              style={{ color: isAudioActive ? "var(--success)" : "var(--fg-ghost)" }}
+              className={`status ${isAudioActive ? "status--active" : ""}`}
+              style={{ color: isAudioActive ? undefined : "var(--fg-tertiary)" }}
             >
               <span className={`status-dot ${isAudioActive ? "pulse" : ""}`} />
               {statusText}
@@ -728,14 +729,15 @@ function BroadcastControls({
                 className="btn"
                 style={{
                   marginLeft: 12,
-                  padding: "8px 16px",
-                  fontSize: "12px",
+                  padding: "7px 14px",
+                  fontSize: "13px",
                   border: isPaused ? "none" : "1px solid var(--warning)",
-                  background: isPaused ? "var(--fg)" : "transparent",
-                  color: isPaused ? "var(--bg)" : "var(--warning)",
+                  background: isPaused ? "var(--warning-soft)" : "transparent",
+                  color: "var(--warning-ink)",
+                  fontWeight: 600,
                 }}
               >
-                {isPaused ? "▶ Weiter" : "❚❚ Pause"}
+                {isPaused ? text.resume : text.pause}
               </button>
             )}
 
@@ -746,9 +748,9 @@ function BroadcastControls({
                   marginLeft: 12,
                   padding: "4px 8px",
                   background: "var(--success-soft)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "4px",
-                  fontSize: "11px",
+                  color: "var(--success-ink)",
+                  borderRadius: "6px",
+                  fontSize: "12px",
                 }}
               >
                 <svg
@@ -766,48 +768,43 @@ function BroadcastControls({
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
-                Screen Awake
+                {text.screenOn}
               </span>
             )}
           </div>
 
-          <span className="mono">
-            {listenerCount} listener{listenerCount !== 1 ? "s" : ""}
+          <span className="meta">
+            {listenerLabel(listenerCount, locale)}
           </span>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Microphone Box */}
           <div
+            className="panel"
             style={{
-              padding: "16px",
-              border: "1px solid var(--border)",
-              background: "var(--bg-elevated)",
               display: "flex",
               flexDirection: "column",
               gap: 12,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 500, fontSize: "14px" }}>Microphone</span>
+              <span style={{ fontWeight: 600, fontSize: "14.5px" }}>{text.microphone}</span>
               <button
                 onClick={toggleMicrophone}
-                className="btn"
+                className={isMicEnabled ? "btn btn-outline" : "btn btn-dark"}
                 style={{
-                  padding: "8px 16px",
-                  fontSize: "12px",
-                  border: isMicEnabled ? "1px solid var(--error)" : "none",
-                  background: isMicEnabled ? "transparent" : "var(--fg)",
-                  color: isMicEnabled ? "var(--error)" : "var(--bg)",
-                  cursor: "pointer",
+                  padding: "7px 14px",
+                  fontSize: "13px",
                 }}
               >
-                {isMicEnabled ? "Disable" : "Enable"}
+                {isMicEnabled ? text.off : text.on}
               </button>
             </div>
             {/* Geraeteauswahl. Die Wahl wird beim Einschalten gespeichert und
                 beim naechsten Oeffnen der Seite automatisch gestartet. */}
             <select
+              aria-label={text.microphone}
               className="input-field"
               value={gewaehltesMikrofon}
               onChange={(e) => mikrofonWechseln(e.target.value)}
@@ -815,18 +812,28 @@ function BroadcastControls({
             >
               {!mikrofone.some((g) => g.deviceId === gewaehltesMikrofon) && (
                 <option value={gewaehltesMikrofon}>
-                  {gewaehltesMikrofon ? "Gespeichertes Mikrofon" : "Standardgerät des Browsers"}
+                  {gewaehltesMikrofon ? text.savedMic : text.defaultDevice}
                 </option>
               )}
               {mikrofone.map((g, i) => (
                 <option key={g.deviceId} value={g.deviceId}>
-                  {g.label || `Mikrofon ${i + 1} (Name nach Freigabe sichtbar)`}
+                  {g.label || `${text.micName} ${i + 1}`}
                 </option>
               ))}
             </select>
             {autostartHinweis && (
               <p className="body-sm" role="alert" style={{ color: "var(--warning)", margin: 0 }}>
-                {autostartHinweis}
+                {(() => {
+                  const missing = autostartHinweis.match(/^Zuletzt verwendetes Mikrofon „(.*)" ist nicht angeschlossen\. Bitte Gerät wählen und einschalten\.$/);
+                  if (missing) return extra.missingDevice(missing[1]);
+                  const prefix = "Automatischer Start fehlgeschlagen: ";
+                  if (autostartHinweis.startsWith(prefix)) {
+                    const detail = autostartHinweis.slice(prefix.length);
+                    const known = (["mixer", "micMissing"] as const).find((key) => Object.values(broadcastMessages).some((message) => message[key] === detail));
+                    return `${extra.autoFailed}: ${known ? text[known] : detail}`;
+                  }
+                  return `${extra.detail}: ${autostartHinweis}`;
+                })()}
               </p>
             )}
             {isMicEnabled && audioGesperrt && (
@@ -841,21 +848,22 @@ function BroadcastControls({
                   fontWeight: 600,
                 }}
               >
-                Ton ist blockiert – hier klicken, um die Übertragung freizugeben
+                {text.audioBlocked}
               </button>
             )}
             {isMicEnabled && (
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span className="mono" style={{ width: "32px", fontSize: "11px" }}>Vol</span>
+                <span className="meta" style={{ fontSize: "12px" }}>{reviewMessages[locale].volume}</span>
                 <input
                   type="range"
                   min="0"
                   max="100"
                   value={micVolume}
+                  aria-label={`${text.microphone}: ${reviewMessages[locale].volume}`}
                   onChange={(e) => handleMicVolumeChange(Number(e.target.value))}
-                  style={{ flexGrow: 1, accentColor: "var(--fg)", cursor: "pointer" }}
+                  style={{ flexGrow: 1, accentColor: "var(--accent)", cursor: "pointer" }}
                 />
-                <span className="mono" style={{ width: "40px", textAlign: "right", fontSize: "11px" }}>
+                <span className="meta" style={{ width: "40px", textAlign: "right", fontSize: "12px" }}>
                   {micVolume}%
                 </span>
               </div>
@@ -864,44 +872,39 @@ function BroadcastControls({
 
           {/* Browser Tab Audio Box */}
           <div
+            className="panel"
             style={{
-              padding: "16px",
-              border: "1px solid var(--border)",
-              background: "var(--bg-elevated)",
               display: "flex",
               flexDirection: "column",
               gap: 12,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: 500, fontSize: "14px" }}>Browser Tab Audio</span>
+              <span style={{ fontWeight: 600, fontSize: "14.5px" }}>{text.browserAudio}</span>
               <button
                 onClick={toggleTabAudio}
-                className="btn"
+                className={isTabAudioEnabled ? "btn btn-outline" : "btn btn-dark"}
                 style={{
-                  padding: "8px 16px",
-                  fontSize: "12px",
-                  border: isTabAudioEnabled ? "1px solid var(--error)" : "none",
-                  background: isTabAudioEnabled ? "transparent" : "var(--fg)",
-                  color: isTabAudioEnabled ? "var(--error)" : "var(--bg)",
-                  cursor: "pointer",
+                  padding: "7px 14px",
+                  fontSize: "13px",
                 }}
               >
-                {isTabAudioEnabled ? "Stop Sharing" : "Share Tab"}
+                {isTabAudioEnabled ? text.stopSharing : text.shareTab}
               </button>
             </div>
             {isTabAudioEnabled && (
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span className="mono" style={{ width: "32px", fontSize: "11px" }}>Vol</span>
+                <span className="meta" style={{ fontSize: "12px" }}>{reviewMessages[locale].volume}</span>
                 <input
                   type="range"
                   min="0"
                   max="100"
                   value={tabVolume}
+                  aria-label={`${text.browserAudio}: ${reviewMessages[locale].volume}`}
                   onChange={(e) => handleTabVolumeChange(Number(e.target.value))}
-                  style={{ flexGrow: 1, accentColor: "var(--fg)", cursor: "pointer" }}
+                  style={{ flexGrow: 1, accentColor: "var(--accent)", cursor: "pointer" }}
                 />
-                <span className="mono" style={{ width: "40px", textAlign: "right", fontSize: "11px" }}>
+                <span className="meta" style={{ width: "40px", textAlign: "right", fontSize: "12px" }}>
                   {tabVolume}%
                 </span>
               </div>
@@ -910,36 +913,36 @@ function BroadcastControls({
         </div>
       </div>
 
-      <hr className="rule" />
-
       {/* QR code */}
       <div
+        className="panel"
         style={{
-          padding: "32px 0",
+          padding: "24px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           gap: 16,
+          marginBottom: 8,
         }}
       >
-        <span className="label">Share with attendees</span>
+        <span className="label" style={{ fontSize: "15px", color: "var(--fg)", fontWeight: 600 }}>
+          {text.community}
+        </span>
         <SessionQRCode url={joinUrl} size={140} />
-        <p className="mono" style={{ wordBreak: "break-all", textAlign: "center" }}>
+        <p className="meta" style={{ wordBreak: "break-all", textAlign: "center" }}>
           {joinUrl}
         </p>
       </div>
 
-      <hr className="rule" />
-
       {/* Active translations */}
-      <div style={{ padding: "28px 0" }}>
-        <span className="label" style={{ marginBottom: 16, display: "block" }}>
-          Translations · {translations.length}
-        </span>
-
+      <div style={{ padding: "24px 0" }}>
+        <h2 className="label" style={{ fontSize: "16px", color: "var(--fg)", marginBottom: 12, display: "block" }}>
+          {text.translations} · {translations.length}
+        </h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {translations.length === 0 ? (
-          <p className="body-sm italic">
-            None yet — attendees can request them
+          <p className="body-sm italic" style={{ margin: 0 }}>
+            {text.noneYet}
           </p>
         ) : (
           translations.map((t) => {
@@ -947,28 +950,28 @@ function BroadcastControls({
             return (
               <div key={t.language} className="lang-row">
                 <div className="lang-row-left">
-                  <span className="lang-flag">{lang?.flag || "🌐"}</span>
+                  <span className="lang-flag" aria-hidden="true">{lang?.flag || ""}</span>
                   <span className="lang-name">
-                    {lang?.name || t.language.toUpperCase()}
+                    {lang ? languageLabel(lang, locale) : t.language.toUpperCase()}
                   </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <span className="lang-meta">
                     {/* hoerer zaehlt die tatsaechlich verbundenen Teilnehmer;
                         subscriberCount bleibt bei hart beendeten Browsern stehen. */}
-                    {t.hoerer ?? t.subscriberCount} Hörer
+                    {listenerLabel(t.hoerer ?? t.subscriberCount, locale)}
                   </span>
                   {(() => {
                     const a =
                       GESUNDHEIT_ANZEIGE[t.gesundheit ?? ""] ??
-                      { text: t.status, klasse: t.status === "active" ? "active" : "waiting" };
+                      { text: t.status === "active" ? text.healthy : text.waiting, klasse: t.status === "active" ? "active" : "waiting" };
                     return (
                       <span
                         className={`status status--${a.klasse}`}
                         title={t.stoerung?.text}
                       >
                         <span className="status-dot pulse" />
-                        {a.text}
+                        {({ gesund: text.healthy, pausiert: text.waiting, verbindet: text.connecting, startet: text.starting, stockend: text.stalled, gestoert: text.disturbed, beendet: text.ended } as Record<string, string>)[t.gesundheit ?? ""] ?? a.text}
                       </span>
                     );
                   })()}
@@ -977,25 +980,24 @@ function BroadcastControls({
             );
           })
         )}
+        </div>
 
         {/* Kostenschaetzung. Aktualisiert sich mit jeder Statusabfrage
             (alle 3 s). Gemessen am 2026-10-04: Gemini rechnet die Zeit ab,
             in der die Verbindung offen ist, nicht den gesprochenen Text. */}
         {kosten && kosten.sprachen.length > 0 && (
           <div
+            className="panel"
             style={{
               marginTop: 24,
-              padding: "16px 20px",
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border)",
               textAlign: "left",
             }}
           >
-            <span className="label" style={{ display: "block", marginBottom: 8 }}>
-              Kosten dieser Session · Schätzung
+            <span className="label" style={{ display: "block", marginBottom: 4 }}>
+              {text.costs}
             </span>
-            <p style={{ fontSize: 28, fontWeight: 600, margin: "0 0 12px" }}>
-              {betrag(kosten.gesamtUsd, kosten.eurKurs)}
+            <p style={{ fontSize: 26, fontWeight: 600, margin: "0 0 12px", fontVariantNumeric: "tabular-nums" }}>
+              {betrag(kosten.gesamtUsd, kosten.eurKurs, locale)}
             </p>
             {kosten.sprachen.map((k) => (
               <div
@@ -1004,35 +1006,30 @@ function BroadcastControls({
                 style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}
               >
                 <span>
-                  {getLanguageByCode(k.sprache)?.name ?? k.sprache}
-                  {k.laeuft ? " · läuft" : ""}
+                  {getLanguageByCode(k.sprache) ? languageLabel(getLanguageByCode(k.sprache)!, locale) : k.sprache}
+                  {k.laeuft ? ` · ${text.running}` : ""}
                 </span>
-                <span className="mono">
-                  {Math.round(k.eingabeSek / 60)} min · {betrag(k.usd, kosten.eurKurs)}
+                <span className="meta">
+                  {Math.round(k.eingabeSek / 60)} min · {betrag(k.usd, kosten.eurKurs, locale)}
                 </span>
               </div>
             ))}
             <p className="body-sm" style={{ margin: "10px 0 0", opacity: 0.7 }}>
-              Berechnet aus übertragenen Audiominuten und Googles Preisliste.
-              Abgerechnet wird, solange die Verbindung besteht – auch bei
-              Musik und Stille. Pause trennt nach 5&nbsp;s und hält den
-              Zähler an.
+              {text.costInfo}
             </p>
           </div>
         )}
 
         {systemInstruction && (
           <div
+            className="panel"
             style={{
               marginTop: 16,
-              padding: "12px 16px",
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border)",
               textAlign: "left",
             }}
           >
             <span className="label" style={{ display: "block", marginBottom: 6 }}>
-              System Instruction
+              {text.instruction}
             </span>
             <p
               className="body-sm"
@@ -1049,10 +1046,8 @@ function BroadcastControls({
         )}
       </div>
 
-      <hr className="rule" />
-
       {/* End */}
-      <div style={{ paddingTop: 28 }}>
+      <div style={{ paddingTop: 8 }}>
         <button
           className="btn-danger"
           onClick={async () => {
@@ -1069,7 +1064,7 @@ function BroadcastControls({
           }}
           style={{ width: "100%" }}
         >
-          End broadcast
+          {text.end}
         </button>
       </div>
     </div>
@@ -1082,12 +1077,14 @@ export default function BroadcastPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: sessionId } = use(params);
+  const locale = useUiLocale();
+  const text = broadcastMessages[locale];
   const [token, setToken] = useState("");
   const [livekitUrl, setLivekitUrl] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ kind: "disconnected" | "tokenFailed" | "detail"; detail?: string } | null>(null);
   const [passwordPromptRequired, setPasswordPromptRequired] = useState(false);
   const [localPassword, setLocalPassword] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const isEndingRef = useRef(false);
 
@@ -1095,8 +1092,8 @@ export default function BroadcastPage({
     isEndingRef.current = true;
   }, []);
 
-  const fetchToken = useCallback(async (pass: string) => {
-    try {
+  const fetchToken = useCallback((pass: string) => {
+    async function requestToken() {
       const identity = `organizer-host`;
       const url = `/api/token?room=${sessionId}&identity=${identity}&role=organizer${pass ? `&password=${encodeURIComponent(pass)}` : ""}`;
       const res = await fetch(url);
@@ -1108,35 +1105,40 @@ export default function BroadcastPage({
       }
       
       if (!res.ok || data.error) {
-        throw new Error(data.error || "Failed to fetch token");
+        if (data.error) throw new Error(data.error);
+        setError({ kind: "tokenFailed" });
+        return false;
       }
       
       if (pass) {
-        sessionStorage.setItem("broadcast_password", pass);
+        try { sessionStorage.setItem("broadcast_password", pass); } catch { /* continue without cached password */ }
       }
       setToken(data.token);
       setLivekitUrl(data.serverUrl);
       setPasswordPromptRequired(false);
       return true;
-    } catch (err) {
-      setError((err as Error).message);
-      return false;
     }
+
+    return requestToken().catch((err: unknown) => {
+      setError({ kind: "detail", detail: (err as Error).message });
+      return false;
+    });
   }, [sessionId]);
 
   useEffect(() => {
-    const cachedPass = sessionStorage.getItem("broadcast_password") || "";
+    let cachedPass = "";
+    try { cachedPass = sessionStorage.getItem("broadcast_password") || ""; } catch { /* ask for password if needed */ }
     fetchToken(cachedPass);
   }, [fetchToken]);
 
   const handlePasswordSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setVerifying(true);
-    setPasswordError(null);
+    setPasswordError(false);
     const success = await fetchToken(localPassword);
     setVerifying(false);
     if (!success && !error) {
-      setPasswordError("Incorrect password");
+      setPasswordError(true);
     }
   };
 
@@ -1145,27 +1147,27 @@ export default function BroadcastPage({
       <div className="page enter">
         <div className="container" style={{ textAlign: "center" }}>
           <h1 className="display display-md" style={{ marginBottom: 12 }}>
-            <em>Password</em> Required
+            {text.passwordRequired}
           </h1>
           <p className="body-sm" style={{ marginBottom: 32 }}>
-            This broadcast session is password-protected.
+            {text.protected}
           </p>
           <form onSubmit={handlePasswordSubmit}>
             <div style={{ marginBottom: 20 }}>
               <input
                 type="password"
                 className="input-field"
-                placeholder="Enter password"
+                placeholder={text.password}
                 value={localPassword}
                 onChange={(e) => setLocalPassword(e.target.value)}
-                style={{ textAlign: "center" }}
                 disabled={verifying}
                 required
+                aria-label={text.password}
               />
             </div>
             {passwordError && (
-              <p className="body-sm" style={{ color: "var(--error)", marginBottom: 20 }}>
-                {passwordError}
+              <p className="body-sm" style={{ color: "var(--error-ink)", marginBottom: 20 }} role="alert">
+                {text.wrongPassword}
               </p>
             )}
             <button
@@ -1174,7 +1176,7 @@ export default function BroadcastPage({
               style={{ width: "100%" }}
               disabled={verifying}
             >
-              {verifying ? "Verifying…" : "Submit"}
+              {verifying ? text.checking : text.continue}
             </button>
           </form>
           <button
@@ -1182,7 +1184,7 @@ export default function BroadcastPage({
             onClick={() => (window.location.href = "/?einrichten")}
             style={{ marginTop: 16 }}
           >
-            Cancel
+            {text.cancel}
           </button>
         </div>
       </div>
@@ -1193,12 +1195,12 @@ export default function BroadcastPage({
     return (
       <div className="page">
         <div className="container" style={{ textAlign: "center" }}>
-          <p className="display display-md" style={{ marginBottom: 16 }}>
-            Something went wrong
-          </p>
-          <p className="body-sm" style={{ marginBottom: 32 }}>{error}</p>
+          <h1 className="display display-md" style={{ marginBottom: 16 }}>
+            {text.error}
+          </h1>
+          <p className="body-sm" style={{ marginBottom: 32 }}>{error.kind === "detail" ? error.detail : error.kind === "tokenFailed" ? broadcastExtra[locale].tokenFailed : text.disconnected}</p>
           <button className="btn btn-outline" onClick={() => (window.location.href = "/?einrichten")}>
-            Go home
+            {text.home}
           </button>
         </div>
       </div>
@@ -1231,7 +1233,7 @@ export default function BroadcastPage({
         }}
         onDisconnected={() => {
           if (!isEndingRef.current) {
-            setError("Disconnected from LiveKit room. Please check your credentials or network connection.");
+            setError({ kind: "disconnected" });
           }
         }}
       >
