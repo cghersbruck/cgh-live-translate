@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
  * Takes all README/PR screenshots: home (desktop + mobile), watch and broadcast (mobile) in every UI locale.
- * Playwright is not a project dependency. It is loaded from node_modules or from $PLAYWRIGHT_DIR/node_modules.
+ * Playwright is a pinned devDependency (npm ci --ignore-scripts, then: npx --no-install playwright install chromium). $PLAYWRIGHT_DIR/node_modules is an optional fallback.
  *
  * Mock mode (stubbed API, no LiveKit needed):
- *   PLAYWRIGHT_DIR=/Users/Shared/SharedRepos/tailored npm run screenshots
+ *   npm run screenshots
  * Live mode (real session + real LiveKit room; LiveKit/Gemini creds from Infisical project cgh, root path, dev env).
  * Never starts a Gemini translation. Needs an Infisical login; if the session expired, the owner logs in:
- *   PLAYWRIGHT_DIR=/Users/Shared/SharedRepos/tailored infisical run --projectId=ed919770-bc3a-46bb-8458-a70c022b771f --env=dev -- npm run screenshots
+ *   infisical run --projectId=ed919770-bc3a-46bb-8458-a70c022b771f --env=dev -- npm run screenshots
  *
  * Flags go after "--": `npm run screenshots -- --mock` forces mock, `npm run screenshots -- --live` forces live
  * (error if LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET missing). In live mode a missing button or a room that is not connected exits non-zero.
@@ -48,7 +48,7 @@ function loadPlaywright() {
   for (const dir of dirs) {
     try { return createRequire(join(dir, "x.js"))("playwright"); } catch { /* try next */ }
   }
-  die("playwright not found: install playwright as devDependency (needs owner approval) or set PLAYWRIGHT_DIR (dir containing node_modules/playwright), e.g. a repo that has it");
+  die("playwright not found: run npm ci --ignore-scripts or set PLAYWRIGHT_DIR (dir containing node_modules/playwright), e.g. a repo that has it");
 }
 
 async function ensureServer() {
