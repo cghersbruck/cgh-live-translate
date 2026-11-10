@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.21",
@@ -29,6 +31,7 @@
     "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "1.64.1",
     "typescript": "^5"
   }
 }

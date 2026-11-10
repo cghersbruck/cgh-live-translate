@@ -16,6 +16,7 @@
 
 import type { Metadata } from "next";
 import "./globals.css";
+import "./cgh-theme.css";
 
 export const metadata: Metadata = {
   title: "Live Translate",

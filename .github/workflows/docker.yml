@@ -59,7 +59,11 @@ jobs:
       # Annotationen, die niemand mehr liest. Dann faellt ein echter Fehler in
       # unserem Code nicht mehr auf. Deshalb dieser Zuschnitt.
       - name: Lint (nur eigener Code)
-        run: npx eslint src/config src/components src/lib/broadcast-control.ts src/lib/gemini-stoerung.ts src/lib/kosten.ts src/lib/sender-einstellungen.ts src/app/api/control src/app/api/config scripts --no-error-on-unmatched-pattern
+        run: npx eslint src/config src/components src/lib/broadcast-control.ts src/lib/gemini-stoerung.ts src/lib/kosten.ts src/lib/sender-einstellungen.ts src/lib/ui-locale.ts src/lib/watch-messages.ts 'src/app/session/[id]/watch/layout.tsx' src/app/api/control src/app/api/config scripts --no-error-on-unmatched-pattern
+
+      # Node 22 führt die .ts-Tests ohne zusätzliche Abhängigkeit aus.
+      - name: Tests
+        run: npm test
 
       - name: Produktionsbuild
         run: npm run build

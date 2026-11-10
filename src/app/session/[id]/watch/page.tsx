@@ -29,6 +29,7 @@ import LanguageSelector from "./components/LanguageSelector";
 import TonStarten from "@/components/TonStarten";
 import { getLanguageByCode } from "@/lib/languages";
 import { getNativeLanguageName } from "@/config/gemeinde";
+import { UiLanguageSelector, useUiLanguage } from "@/components/UiLanguage";
 
 interface TranscriptEntry {
   id: string;
@@ -84,6 +85,7 @@ function AttendeeView({
   onStummChange: (stumm: boolean) => void;
 }) {
   const room = useRoomContext();
+  const text = useUiLanguage();
   const [currentLanguage, setCurrentLanguage] = useState("original");
   const [translatorIdentity, setTranslatorIdentity] = useState<string | null>(
     null
@@ -463,13 +465,13 @@ function AttendeeView({
     const lang = getLanguageByCode(currentLanguage);
     const sprachName =
       currentLanguage === "original"
-        ? "Original"
+        ? text.original
         : getNativeLanguageName(currentLanguage, lang?.name ?? currentLanguage);
 
     ms.metadata = new MediaMetadata({
-      title: "Live-Übersetzung",
+      title: text.title,
       artist: sprachName,
-      album: "Gottesdienst",
+      album: text.service,
     });
     ms.playbackState = stumm ? "paused" : "playing";
 
@@ -490,7 +492,7 @@ function AttendeeView({
       setzen("stop", null);
       ms.metadata = null;
     };
-  }, [currentLanguage, stumm, onStummChange, handleStop]);
+  }, [currentLanguage, stumm, onStummChange, handleStop, text.original, text.title, text.service]);
 
   // --- Stoerungshinweis ----------------------------------------------------
   //
@@ -526,8 +528,9 @@ function AttendeeView({
     <div className="container enter">
       {/* Header */}
       <div style={{ marginBottom: 40 }}>
+        <div className="ui-language-bar"><UiLanguageSelector /></div>
         <h1 className="display display-lg" style={{ marginBottom: 8 }}>
-          <em>Übersetzung</em>
+          <em>{text.title}</em>
         </h1>
         <p className="mono">{sessionId}</p>
         <button
@@ -535,7 +538,7 @@ function AttendeeView({
           className="btn btn-outline"
           style={{ marginTop: 16, padding: "10px 20px", fontSize: 14 }}
         >
-          ■ Beenden
+          ■ {text.stop}
         </button>
       </div>
 
@@ -550,8 +553,7 @@ function AttendeeView({
             borderRadius: 6,
           }}
         >
-          Die Übersetzung ist gerade unterbrochen. Sie startet von selbst wieder —
-          diese Seite einfach geöffnet lassen.
+          {text.interrupted}
         </div>
       )}
 
@@ -575,13 +577,13 @@ function AttendeeView({
               <span className="status status--active">
                 <span className="status-dot pulse" />
                 {currentLanguage === "original"
-                  ? "Original"
+                  ? text.original
                   : currentLanguage.toUpperCase()}
               </span>
             ) : (
               <span className="status status--waiting">
                 <span className="status-dot pulse" />
-                Warte auf die Übertragung
+                {text.waiting}
               </span>
             )}
 
@@ -612,7 +614,7 @@ function AttendeeView({
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
-                Bildschirm bleibt an
+                {text.screenOn}
               </span>
             )}
           </div>
@@ -644,7 +646,7 @@ function AttendeeView({
             marginBottom: 16,
           }}
         >
-          <span className="label">Mitschrift</span>
+          <span className="label">{text.transcript}</span>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
               onClick={decreaseFontSize}
@@ -654,13 +656,16 @@ function AttendeeView({
                 border: "1px solid var(--border)",
                 color: "var(--fg-secondary)",
                 padding: "4px 10px",
+                minWidth: 44,
+                minHeight: 44,
                 fontSize: "12px",
                 fontFamily: "var(--font-mono)",
                 cursor: fontSize <= 12 ? "not-allowed" : "pointer",
                 opacity: fontSize <= 12 ? 0.4 : 1,
                 transition: "all 0.2s ease",
               }}
-              title="Schrift kleiner"
+              title={text.smaller}
+              aria-label={text.smaller}
             >
               A-
             </button>
@@ -672,13 +677,16 @@ function AttendeeView({
                 border: "1px solid var(--border)",
                 color: "var(--fg-secondary)",
                 padding: "4px 10px",
+                minWidth: 44,
+                minHeight: 44,
                 fontSize: "12px",
                 fontFamily: "var(--font-mono)",
                 cursor: fontSize >= 28 ? "not-allowed" : "pointer",
                 opacity: fontSize >= 28 ? 0.4 : 1,
                 transition: "all 0.2s ease",
               }}
-              title="Schrift größer"
+              title={text.larger}
+              aria-label={text.larger}
             >
               A+
             </button>
@@ -695,8 +703,8 @@ function AttendeeView({
           {transcripts.length === 0 ? (
             <p className="body-sm italic">
               {currentLanguage === "original"
-                ? "Sprache wählen, um die Mitschrift zu sehen"
-                : "Warte auf die Übersetzung …"}
+                ? text.selectToRead
+                : text.waitingTranslation}
             </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -730,7 +738,7 @@ function AttendeeView({
       <hr className="rule" />
 
       <p className="body-sm" style={{ paddingTop: 28 }}>
-        Übersetzung in Echtzeit erzeugt von <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-live-3-5-translate/" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline", color: "inherit" }}>Gemini 3.5 Live Translate</a>.
+        {text.realtime} <a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-live-3-5-translate/" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "underline", color: "inherit" }}>Gemini 3.5 Live Translate</a>.
       </p>
     </div>
   );
@@ -743,6 +751,7 @@ export default function WatchPage({
   params: Promise<{ id: string }>;
 }) {
   const { id: sessionId } = use(params);
+  const text = useUiLanguage();
   const [token, setToken] = useState("");
   const [livekitUrl, setLivekitUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -777,19 +786,19 @@ export default function WatchPage({
     return (
       <div className="page">
         <div className="container" style={{ textAlign: "center" }}>
+          <div className="ui-language-bar"><UiLanguageSelector /></div>
           <p className="display display-md" style={{ marginBottom: 16 }}>
-            {isInactiveSession ? "Die Übertragung läuft noch nicht" : "Es ist ein Fehler aufgetreten"}
+            {isInactiveSession ? text.inactive : text.error}
           </p>
           <p className="body-sm" style={{ marginBottom: 32 }}>
-            {isInactiveSession
-              ? "Sobald der Gottesdienst beginnt, kannst du hier mithören. Diese Seite geöffnet lassen und gleich erneut prüfen."
-              : error}
+            {isInactiveSession ? text.inactiveHelp : text.errorHelp}
           </p>
+          {!isInactiveSession && <p className="body-sm" style={{ marginBottom: 24 }}>{text.details}: {error}</p>}
           <button
             className="btn btn-outline"
             onClick={() => window.location.reload()}
           >
-            {isInactiveSession ? "Erneut prüfen" : "Nochmal versuchen"}
+            {isInactiveSession ? text.retry : text.tryAgain}
           </button>
         </div>
       </div>
@@ -801,7 +810,7 @@ export default function WatchPage({
       <div className="page">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <div className="spinner" />
-          <p className="mono">Verbinde …</p>
+          <p className="mono">{text.connecting}</p>
         </div>
       </div>
     );
@@ -811,14 +820,15 @@ export default function WatchPage({
     return (
       <div className="page">
         <div className="container enter" style={{ textAlign: "center" }}>
+          <div className="ui-language-bar"><UiLanguageSelector /></div>
           <h1 className="display display-lg" style={{ marginBottom: 12 }}>
-            <em>Bereit</em>
+            <em>{text.ready}</em>
           </h1>
           <p className="body-sm" style={{ marginBottom: 40 }}>
-            Zum Mithören tippen. Danach den Ton freigeben.
+            {text.readyHelp}
           </p>
           <button
-            className="btn"
+            className="btn btn-dark"
             onClick={() => {
               // Audio Session API (Safari 16.4+): als Wiedergabe statt als
               // Umgebungston einstufen. Kann iOS dazu bringen, den Ton bei
@@ -839,10 +849,10 @@ export default function WatchPage({
               setStarted(true);
             }}
           >
-            Übersetzung anhören
+            {text.listen}
           </button>
           <p className="mono" style={{ marginTop: 32, fontSize: 12 }}>
-            Gottesdienst · {sessionId}
+            {text.service} · {sessionId}
           </p>
         </div>
       </div>

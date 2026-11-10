@@ -17,9 +17,11 @@
 import { useEffect, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { RoomEvent } from "livekit-client";
+import { UiLanguageSelector, useUiLanguage } from "@/components/UiLanguage";
 
 export default function TonStarten() {
   const room = useRoomContext();
+  const text = useUiLanguage();
   const [kannAbspielen, setKannAbspielen] = useState(true);
   const [laeuft, setLaeuft] = useState(false);
 
@@ -66,8 +68,9 @@ export default function TonStarten() {
         textAlign: "center",
       }}
     >
+      <div style={{ color: "#fff" }}><UiLanguageSelector /></div>
       <p style={{ fontSize: 20, lineHeight: 1.4, color: "#fff", margin: 0, maxWidth: 420 }}>
-        Dein Telefon erlaubt den Ton erst nach einer Berührung.
+        {text.audioPrompt}
       </p>
 
       <button
@@ -88,11 +91,11 @@ export default function TonStarten() {
           cursor: "pointer",
         }}
       >
-        {laeuft ? "Einen Moment …" : "Ton starten"}
+        {laeuft ? text.wait : text.startAudio}
       </button>
 
       <p style={{ fontSize: 15, color: "rgba(255,255,255,0.7)", margin: 0, maxWidth: 420 }}>
-        Danach läuft die Übersetzung von selbst weiter.
+        {text.audioContinues}
       </p>
     </div>
   );
