@@ -1,0 +1,73 @@
+/*
+ * Farben der Christengemeinde Hersbruck: Papier, Dunkelblau und Gold.
+ * Wird nach globals.css geladen und überschreibt nur Farbwerte. Aufbau,
+ * Schriften und Klassen der Seiten bleiben wie im Original.
+ */
+
+:root {
+  --bg: #faf6f0;
+  --bg-elevated: #f3ecdf;
+  --bg-inset: #f1e7d8;
+
+  --fg: #0f1825;
+  --fg-secondary: #43536a;
+  --fg-tertiary: #526075;
+  --fg-ghost: #687587;
+
+  --accent: #7e5b0e;
+  --accent-soft: #f7f0e1;
+
+  --border: #d9d1c5;
+  --border-light: #e9e1d5;
+
+  /* Zustandsfarben dienen auch als Textfarbe und sind deshalb dunkel */
+  --success: #1e5634;
+  --success-soft: #e7f2ea;
+  --warning: #7a540a;
+  --warning-soft: #f9f0dd;
+  --error: #a8321f;
+  --error-soft: #f9e8e5;
+}
+
+.btn-dark:hover {
+  background: #17324d;
+}
+
+/* Hörerseite: Sprachumschaltung im Seitenkopf */
+.ui-language-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.ui-language {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+}
+
+.select-field--small {
+  width: auto;
+  min-height: 44px;
+  padding: 6px 32px 6px 10px;
+  font-size: 16px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Unter 16 px zoomt iOS Safari beim Antippen in das Feld hinein. */
+@media (max-width: 520px) {
+  .select-field,
+  .input-field {
+    font-size: 16px;
+  }
+}

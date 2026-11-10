@@ -72,9 +72,25 @@ Vergleichsbasis für alle späteren Änderungen liefert.
 | `src/app/page.tsx` (erneut) | **geändert** | Haken „Auf diesem PC merken" und Session-Autostart. Siehe Abschnitt „Session-Autostart". |
 | `src/app/session/[id]/broadcast/page.tsx` (erneut) | **geändert** | Mikrofonauswahl auf der Seite und Autostart: Beim Öffnen startet das Mikrofon mit Gerät und Lautstärke vom letzten Mal. Siehe Abschnitt „Autostart der Sendeseite". |
 | `.gitignore` | **ergänzt** | `/logs` — Testlauf-Logs gehören nicht ins Repository. Dazu `!.env.example`: Das vorhandene Muster `.env*` hätte sonst auch die Vorlage ausgeschlossen, die eingecheckt werden muss. |
+| `src/lib/ui-locale.ts` | **neu** | Die sieben Oberflächensprachen der Hörerseite (de, en, zh-Hans, es, ro, ru, hu) und die Wahl der Sprache: erst gespeicherte Wahl, dann Browsersprache, sonst Deutsch. |
+| `src/lib/watch-messages.ts` | **neu** | Alle Texte der Hörerseite je Sprache, als Objekte mit benannten Schlüsseln. Ein fehlender Schlüssel ist ein TypeScript-Fehler. Die Übersetzungen sollten Muttersprachler vor dem Einsatz gegenlesen. |
+| `src/components/UiLanguage.tsx` | **neu** | Sprachumschaltung der Hörerseite. Die Wahl liegt unter `cgh-ui-language` im `localStorage`; ohne Speicher gilt weiter die Browsersprache. |
+| `src/app/session/[id]/watch/layout.tsx` | **neu** | Hängt die Sprachumschaltung nur um die Hörerseite. Das Root-Layout bleibt dadurch wie im Original, Start- und Sendeseite bleiben deutsch. |
+| `src/app/session/[id]/watch/page.tsx` (erneut) | **geändert** | Texte kommen aus dem Katalog, die Umschaltung sitzt im Seitenkopf. Die Tippflächen A−/A+ sind 44 px hoch, weil kleinere Flächen auf dem Handy schwer zu treffen sind. „Übersetzung anhören“ ist ein `btn-dark`, sonst hat der Knopf keinen Hintergrund. |
+| `src/app/session/[id]/watch/components/LanguageSelector.tsx` (erneut) | **geändert** | Beschriftungen und Fehlertext aus dem Katalog. |
+| `src/components/TonStarten.tsx` (erneut) | **geändert** | Texte aus dem Katalog. Die Sprachumschaltung steht auch im Hinweisfenster, weil es die Seite darunter verdeckt. |
+| `src/app/cgh-theme.css` | **neu** | Farben der Christengemeinde Hersbruck als zusätzliche Stildatei, geladen nach `globals.css` (eine Importzeile in `layout.tsx`). Überschreibt nur Farbwerte; Schriften, Klassen und Aufbau von Start- und Sendeseite bleiben unverändert. Dazu wenige Regeln für die Sprachumschaltung und 16 px Schrift in Eingabefeldern auf dem Handy, damit iOS Safari nicht in das Feld hineinzoomt. |
+| `src/app/icon.svg`, `src/app/apple-icon.png`, `src/app/favicon.ico` | **neu / ersetzt** | Eigenes Symbol der Gemeinde für Browser-Tab und Startbildschirm. Next.js bindet die Dateien selbst ein, es ist kein Code nötig. |
+| `src/lib/*.test.ts`, `package.json` (`test`), `.github/workflows/docker.yml` | **neu / ergänzt** | Tests für Sprachwahl und Textkataloge. `npm test` nutzt `node --test` ohne weitere Abhängigkeit (Node 22) und läuft im Job `pruefen` vor dem Build. |
+| `scripts/screenshots.mjs`, `package.json` (`screenshots`, `playwright`) | **neu / ergänzt** | Erzeugt Handy-Screenshots der Hörerseite in allen Sprachen sowie von Start- und Sendeseite auf Deutsch, für Pull Requests. Schreibt nach `$TMPDIR` und nicht ins Repository. Die Infisical-Projekt-ID steht nicht im Skript, sie kommt aus `INFISICAL_PROJECT_ID`. |
 
 ### Bewusst unverändert gelassen
 
+- Start- und Sendeseite (`src/app/page.tsx`, `broadcast/page.tsx`): nur Deutsch,
+  Aufbau wie im Original. Sie bedient nur das Technikteam. Die CGH-Farben greifen
+  über `cgh-theme.css`.
+- `src/app/globals.css` — das Design liegt in `cgh-theme.css`, damit Schriften
+  und Klassen des Originals erhalten bleiben.
 - `src/lib/languages.ts` — die über 70 Sprachen bleiben stehen. Die Einschränkung
   auf die Gemeinde-Auswahl läuft über den vorhandenen `allowedLanguages`-
   Mechanismus, nicht durch Löschen von Einträgen.

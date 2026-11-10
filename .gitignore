@@ -12,8 +12,6 @@
 
 # testing
 /coverage
-.playwright-mcp/
-.taste-skill/
 
 # next.js
 /.next/

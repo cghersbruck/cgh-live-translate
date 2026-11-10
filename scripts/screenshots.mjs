@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
- * Takes all README/PR screenshots: home (desktop + mobile), watch and broadcast (mobile) in every UI locale.
+ * Takes the PR screenshots: the watch page (mobile) in every UI locale, home and broadcast (mobile) once in German.
+ * Only the watch page is translated; home and broadcast stay German.
  * Playwright is a pinned devDependency (npm ci --ignore-scripts, then: npx --no-install playwright install chromium). $PLAYWRIGHT_DIR/node_modules is an optional fallback.
  *
  * Mock mode (stubbed API, no LiveKit needed):
  *   npm run screenshots
- * Live mode (real session + real LiveKit room; LiveKit/Gemini creds from Infisical project cgh, root path, dev env).
+ * Live mode (real session + real LiveKit room; LiveKit creds from Infisical, dev env, project id in INFISICAL_PROJECT_ID).
  * Never starts a Gemini translation. Needs an Infisical login; if the session expired, the owner logs in:
- *   infisical run --projectId=ed919770-bc3a-46bb-8458-a70c022b771f --env=dev -- npm run screenshots
+ *   infisical run --projectId="$INFISICAL_PROJECT_ID" --env=dev -- npm run screenshots
  *
  * Flags go after "--": `npm run screenshots -- --mock` forces mock, `npm run screenshots -- --live` forces live
  * (error if LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET missing). In live mode a missing button or a room that is not connected exits non-zero.
  * Env: BASE_URL (else http://localhost:3100, started with `next dev` if nothing answers),
- * OUT_DIR (default docs/screenshots; must be a subdirectory of the repo or of the system temp dir, only its *.png are deleted),
+ * OUT_DIR (default <system temp dir>/cgh-screenshots; must be a subdirectory of the system temp dir, only its *.png are deleted;
+ * the images are not meant to be committed, drag them into the PR comment),
  * SHOTS_PORT (default 3100, port of a server this script starts), BROADCAST_PASSWORD (a random one is used for a server this script starts). Env values are never printed.
  */
 import { spawn } from "node:child_process";
@@ -23,13 +25,17 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const OUT = resolve(root, process.env.OUT_DIR || "docs/screenshots");
+const OUT = resolve(root, process.env.OUT_DIR || join(tmpdir(), "cgh-screenshots"));
 const inside = (base, p) => { const r = relative(base, p); return r !== "" && !r.startsWith("..") && !isAbsolute(r); };
-if (![root, "/tmp", "/private/tmp", tmpdir()].some((b) => inside(b, OUT))) die(`OUT_DIR must be a subdirectory of the repo or of the system temp dir, got: ${OUT}`);
+if (!["/tmp", "/private/tmp", tmpdir()].some((b) => inside(b, OUT))) die(`OUT_DIR must be a subdirectory of the system temp dir, got: ${OUT}`);
 const LOCALES = ["de", "en", "zh-Hans", "es", "ro", "ru", "hu"];
 const LIVE_ENV = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"];
 const missing = LIVE_ENV.filter((k) => !process.env[k]);
-if (process.argv.includes("--live") && missing.length) die(`--live needs env: ${missing.join(", ")} (names only)`);
+if (process.argv.includes("--live") && missing.length) {
+  die(`--live braucht diese Umgebungsvariablen: ${missing.join(", ")}. Mit Infisical: ${process.env.INFISICAL_PROJECT_ID
+    ? 'infisical run --projectId="$INFISICAL_PROJECT_ID" --env=dev -- npm run screenshots -- --live'
+    : "zuerst INFISICAL_PROJECT_ID setzen (Projekt-ID aus den lokalen Notizen), dann infisical run --projectId=\"$INFISICAL_PROJECT_ID\" --env=dev -- npm run screenshots -- --live"}`);
+}
 const LIVE = process.argv.includes("--live") || (!process.argv.includes("--mock") && !missing.length);
 const PORT = process.env.SHOTS_PORT || "3100";
 const BASE = process.env.BASE_URL || `http://localhost:${PORT}`;
@@ -112,7 +118,7 @@ async function newContext(browser, loc, mobile) {
 async function open(ctx, path, name, connected, click) {
   const page = await ctx.newPage();
   await page.goto(BASE + path, { waitUntil: "load", timeout: 90_000 });
-  // first dark button: watch = "start listening" gate (needed for audio), broadcast = microphone on (fake device)
+  // first dark button: the watch page's "start listening" gate (needed for audio)
   if (click) await page.click(".btn-dark", { timeout: 10_000 }).catch(() => { failed++; console.warn(`WARN ${name}: button not found, shooting current state`); });
   if (LIVE && connected) {
     await page.waitForSelector(".status--active", { timeout: 20_000 }).then(() => console.log(`  ${name}: connected`),
@@ -160,22 +166,19 @@ async function main() {
   mkdirSync(OUT, { recursive: true });
   for (const f of readdirSync(OUT)) if (f.endsWith(".png")) unlinkSync(join(OUT, f));
   try {
-    await step("home-de-desktop", async () => {
-      const ctx = await newContext(browser, "de", false);
-      await snap(await open(ctx, "/", "home-de-desktop"), "home-de-desktop");
-      await ctx.close();
+    await step("german-pages", async () => {
+      const ctx = await newContext(browser, "de", true);
+      try {
+        await snap(await open(ctx, "/", "home-de-mobile"), "home-de-mobile");
+        await snap(await open(ctx, `/session/${id}/broadcast`, "broadcast-de-mobile"), "broadcast-de-mobile");
+      } finally { await ctx.close(); }
     });
     for (const loc of LOCALES) {
-      await step(`mobile-${loc}`, async () => {
-        const host = await newContext(browser, loc, true);
-        const listener = await newContext(browser, loc, true); // second context: separate browser session
+      await step(`watch-${loc}`, async () => {
+        const ctx = await newContext(browser, loc, true);
         try {
-          await snap(await open(host, "/", `home-${loc}-mobile`), `home-${loc}-mobile`);
-          const b = await open(host, `/session/${id}/broadcast`, `broadcast-${loc}-mobile`, true, LIVE);
-          const w = await open(listener, `/session/${id}/watch`, `watch-${loc}-mobile`, true, true);
-          await snap(w, `watch-${loc}-mobile`);
-          await snap(b, `broadcast-${loc}-mobile`);
-        } finally { await host.close(); await listener.close(); }
+          await snap(await open(ctx, `/session/${id}/watch`, `watch-${loc}-mobile`, true, true), `watch-${loc}-mobile`);
+        } finally { await ctx.close(); }
       });
     }
   } finally {

@@ -190,8 +190,8 @@ export default function LanguageSelector({
       </div>
 
       {/* State feedback */}
-      <div role="status" style={{ marginTop: 10, minHeight: 20 }}>
-        {currentLanguage !== "original" && currentLang && !loading && !error && (
+      <div style={{ marginTop: 10, minHeight: 20 }}>
+        {currentLanguage !== "original" && currentLang && !loading && (
           <span className="status status--active">
             <span className="status-dot pulse" />
             {text.translating} {getNativeLanguageName(currentLang.code, currentLang.name)}

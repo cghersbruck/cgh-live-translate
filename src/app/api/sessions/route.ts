@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     
     let allowedLanguages: string[] | undefined = undefined;
     if (Array.isArray(body.allowedLanguages)) {
-      allowedLanguages = body.allowedLanguages.filter((l: unknown): l is string => typeof l === "string");
+      allowedLanguages = body.allowedLanguages.filter((l: any) => typeof l === "string");
     }
 
     let systemInstruction: string | undefined = undefined;
