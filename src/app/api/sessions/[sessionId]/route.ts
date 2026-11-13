@@ -40,9 +40,15 @@ export async function GET(
 
 // DELETE /api/sessions/:sessionId — End a session and clean up all bridges
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  // Nur der Sender darf eine Session beenden. Die Event-ID steht im QR-Code.
+  const expectedPassword = process.env.BROADCAST_PASSWORD;
+  if (expectedPassword && req.headers.get("x-broadcast-password") !== expectedPassword) {
+    return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
+  }
+
   const { sessionId } = await params;
   const manager = TranslationSessionManager.getInstance();
 

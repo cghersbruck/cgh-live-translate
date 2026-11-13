@@ -237,7 +237,7 @@ async function abschluss(beginn) {
   console.log("");
   console.log("Session wird NICHT automatisch beendet, damit die Bridge-Logs");
   console.log("auswertbar bleiben. Zum Abbauen:");
-  console.log(`  curl -X DELETE ${APP}/api/sessions/${SESSION}`);
+  console.log(`  curl -X DELETE -H "x-broadcast-password: $BROADCAST_PASSWORD" ${APP}/api/sessions/${SESSION}`);
   try { if (ff) ff.kill(); } catch {}
   try { if (room) await room.disconnect(); } catch {}
   process.exit(0);
