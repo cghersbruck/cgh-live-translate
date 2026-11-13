@@ -350,29 +350,23 @@ function AttendeeView({
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      handleBeforeUnload();
+      // Kein handleBeforeUnload() hier: Beim Abbau der Seite meldet
+      // LanguageSelector bereits ab (Unmount-Beacon).
     };
   }, [sessionId]);
 
   const handleLanguageChange = useCallback(
     (langCode: string, newTranslatorIdentity: string | null) => {
-      // Unsubscribe from the previous language
-      const prev = currentLanguageRef.current;
-      if (prev && prev !== "original" && prev !== langCode) {
-        fetch("/api/translate/unsubscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, targetLanguage: prev }),
-        }).catch(() => {});
-      }
-
+      // Die alte Sprache meldet LanguageSelector ab (POST mit previousLanguage
+      // oder DELETE bei "Original"). Eine zweite Abmeldung hier zaehlte doppelt
+      // herunter und riss anderen Hoerern die Uebersetzung weg.
       setCurrentLanguage(langCode);
       currentLanguageRef.current = langCode;
       setTranslatorIdentity(newTranslatorIdentity);
       // Clear transcripts when switching languages
       setTranscripts([]);
     },
-    [sessionId]
+    []
   );
 
   const [isConnected, setIsConnected] = useState(false);
@@ -511,6 +505,16 @@ function AttendeeView({
           (x: { language: string; gesundheit?: string }) => x.language === currentLanguage
         );
         if (aktiv) setGestoerteSprache(t?.gesundheit === "gestoert" ? currentLanguage : null);
+        // Bridge weg und keine Stoerung vermerkt: Der Sender war kurz getrennt,
+        // dabei stoppen alle Bridges. Uebersetzung neu anfordern, sonst hoert
+        // jeder Hoerer Stille, bis er die Sprache von Hand neu waehlt.
+        if (aktiv && res.ok && !t) {
+          await fetch("/api/translate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId, targetLanguage: currentLanguage }),
+          });
+        }
       } catch {
         // Kurzer Netzaussetzer am Handy - naechste Runde abwarten.
       }

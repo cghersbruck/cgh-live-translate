@@ -89,6 +89,8 @@ const globalForSessionManager = global as unknown as {
 class TranslationSessionManager {
   // Map<sessionId, Map<languageCode, TranslationBridge>>
   private translations: Map<string, Map<string, TranslationBridge>> = new Map();
+  /** Laufender Start je Bridge, damit gleichzeitige Anforderungen darauf warten. */
+  private starts = new WeakMap<TranslationBridge, Promise<void>>();
 
   // Map<sessionId, SessionInfo>
   private sessions: Map<string, SessionInfo> = new Map();
@@ -211,6 +213,21 @@ class TranslationSessionManager {
     let languageMap = this.translations.get(sessionId);
     if (languageMap) {
       const existingBridge = languageMap.get(targetLanguage);
+      // Start laeuft noch: nicht noch eine Bridge bauen, sondern auf diese warten.
+      // Sonst entstuenden zwei Bridges mit derselben LiveKit-Identitaet, und die
+      // erste liefe ohne Eintrag in der Map weiter (Gemini-Kosten).
+      if (existingBridge && existingBridge.status === "starting") {
+        existingBridge.subscriberCount++;
+        try {
+          await this.starts.get(existingBridge);
+        } catch (error) {
+          // Wer wartet, bekommt denselben Fehlertyp wie der, der den Start auslöste.
+          const stoerung = this.stoerungen.get(sessionId)?.get(targetLanguage);
+          if (stoerung) throw new StoerungsFehler(stoerung);
+          throw error;
+        }
+        return existingBridge;
+      }
       if (existingBridge && existingBridge.status === "active") {
         console.log(
           `[SessionManager] Reusing existing bridge for ${targetLanguage} in session ${sessionId}`
@@ -302,14 +319,19 @@ class TranslationSessionManager {
     }
     languageMap.set(targetLanguage, bridge);
 
+    // Zaehler vor dem Start setzen: Wer waehrend des Starts dazukommt, zaehlt
+    // oben hoch. Nach dem Start darf er nicht mehr auf 1 zurueckgesetzt werden.
+    bridge.subscriberCount = 1;
+    const start = bridge.start();
+    this.starts.set(bridge, start);
     try {
-      await bridge.start();
-      bridge.subscriberCount = 1;
+      await start;
       this.stoerungLoeschen(sessionId, targetLanguage);
       return bridge;
     } catch (error) {
-      // Clean up on failure
-      languageMap.delete(targetLanguage);
+      // Clean up on failure. Nur den eigenen Eintrag: Ein späterer Aufruf kann
+      // inzwischen eine neue Bridge eingetragen haben.
+      if (languageMap.get(targetLanguage) === bridge) languageMap.delete(targetLanguage);
 
       // Grund festhalten, damit die Sendeseite ihn anzeigen kann.
       const { code, grund } = ausFehler(error);

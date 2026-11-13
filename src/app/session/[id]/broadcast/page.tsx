@@ -23,7 +23,7 @@ import {
   useRoomContext,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { Track, RoomEvent } from "livekit-client";
+import { Track, RoomEvent, DisconnectReason } from "livekit-client";
 import SessionQRCode from "@/components/SessionQRCode";
 import CompanionControl from "@/components/CompanionControl";
 import { getLanguageByCode } from "@/lib/languages";
@@ -1059,7 +1059,10 @@ function BroadcastControls({
             onEndBroadcast();
             try {
               // Explicitly notify server that broadcast is ended to stop all translator bots
-              await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+              await fetch(`/api/sessions/${sessionId}`, {
+                method: "DELETE",
+                headers: { "x-broadcast-password": sessionStorage.getItem("broadcast_password") || "" },
+              });
             } catch (err) {
               console.error("Failed to explicitly delete session on broadcast end:", err);
             }
@@ -1229,9 +1232,17 @@ export default function BroadcastPage({
           alignItems: "center",
           width: "100%",
         }}
-        onDisconnected={() => {
+        onDisconnected={(reason) => {
           if (!isEndingRef.current) {
             setError("Disconnected from LiveKit room. Please check your credentials or network connection.");
+            // Unbeaufsichtigter Sende-PC: nach kurzer Zeit zur Startseite. Deren
+            // Autostart steigt in die laufende Session wieder ein oder legt sie
+            // neu an. "?einrichten" wuerde den Autostart unterdruecken.
+            // Nicht bei doppelter Identität: Ein zweiter Sende-PC hat übernommen.
+            // Ein Rücksprung würde ihn wieder verdrängen (Endlosschleife).
+            if (reason !== DisconnectReason.DUPLICATE_IDENTITY) {
+              setTimeout(() => (window.location.href = "/"), 5000);
+            }
           }
         }}
       >

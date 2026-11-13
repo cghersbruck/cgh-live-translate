@@ -77,7 +77,7 @@ process.on("exit", stopServer);
 let cleanup = null;
 const cleanupOnce = () => (cleanup ??= (async () => {
   await browser?.close().catch(() => {});
-  if (sessionId) await fetch(`${BASE}/api/sessions/${sessionId}`, { method: "DELETE", signal: AbortSignal.timeout(5000) }).catch(() => console.warn("WARN: live session delete failed"));
+  if (sessionId) await fetch(`${BASE}/api/sessions/${sessionId}`, { method: "DELETE", headers: { "x-broadcast-password": password }, signal: AbortSignal.timeout(5000) }).catch(() => console.warn("WARN: live session delete failed"));
   stopServer();
 })());
 for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.on(sig, () => cleanupOnce().finally(() => process.exit(code)));

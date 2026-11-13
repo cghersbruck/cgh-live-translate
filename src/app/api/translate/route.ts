@@ -51,13 +51,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Unsubscribe from the previous language if switching
-    if (previousLanguage && previousLanguage !== "original") {
-      await manager.unsubscribe(sessionId, previousLanguage);
-    }
+    // Die alte Sprache wird erst abgemeldet, wenn die neue steht. Scheitert der
+    // Wechsel, bleibt der Hörer auf der alten Sprache und wird nicht doppelt
+    // abgemeldet. Ein Statusabruf während des Wechsels startet die alte
+    // Bridge auch nicht neu.
+    const alteSpracheAbmelden = async () => {
+      if (previousLanguage && previousLanguage !== "original") {
+        await manager.unsubscribe(sessionId, previousLanguage);
+      }
+    };
 
     // Skip translation for the original language (no bridge needed)
     if (targetLanguage === "original") {
+      await alteSpracheAbmelden();
       return NextResponse.json({
         translatorIdentity: null,
         status: "original",
@@ -65,12 +71,17 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Gleiche Sprache erneut angefordert: erst abmelden, dann zählen. Sonst
+    // stoppte die Abmeldung die eben erst gestartete Bridge.
+    if (previousLanguage === targetLanguage) await alteSpracheAbmelden();
+
     // Get or create the translation bridge
     const bridge = await manager.getOrCreate(
       sessionId,
       targetLanguage,
       session.organizerIdentity
     );
+    if (previousLanguage !== targetLanguage) await alteSpracheAbmelden();
 
     return NextResponse.json({
       translatorIdentity: bridge.identity,
